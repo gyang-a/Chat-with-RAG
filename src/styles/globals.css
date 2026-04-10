@@ -1,0 +1,77 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background:
+    radial-gradient(1200px 600px at 0% -20%, hsl(var(--primary) / 0.08), transparent),
+    radial-gradient(1000px 500px at 100% -10%, hsl(188 90% 55% / 0.08), transparent),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+  transition: background-color 0.28s ease, color 0.28s ease;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+}
+
+select,
+select option {
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 10px;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 0.6rem 0;
+  line-height: 1.35;
+}
+
+.markdown-body h1 {
+  font-size: 1.18rem;
+}
+
+.markdown-body h2 {
+  font-size: 1.06rem;
+}
+
+.markdown-body h3 {
+  font-size: 1rem;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.45rem 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.1rem;
+}
+
+.markdown-body pre {
+  margin: 0;
+}

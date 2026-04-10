@@ -1,0 +1,43 @@
+:root {
+  --background: 220 20% 98%;
+  --foreground: 222 35% 13%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 35% 13%;
+  --muted: 216 30% 95%;
+  --muted-foreground: 220 11% 45%;
+  --border: 220 20% 90%;
+  --primary: 217 92% 58%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 216 32% 94%;
+  --accent-foreground: 222 35% 13%;
+  --sidebar: 220 30% 97%;
+  --sidebar-foreground: 222 32% 18%;
+  --sidebar-border: 220 22% 88%;
+  --user: 217 95% 58%;
+  /* --ai: 216 24% 95%; */
+  /* --ai: 216 80% 98%; */
+  /* --ai: 0 0% 99%; */ 
+  --ai: 216 100% 90%;
+  --shadow: 220 18% 40%;
+  --radius: 12px;
+}
+
+.dark {
+  --background: 224 18% 10%;
+  --foreground: 210 25% 94%;
+  --card: 223 17% 13%;
+  --card-foreground: 210 25% 94%;
+  --muted: 223 14% 18%;
+  --muted-foreground: 216 16% 72%;
+  --border: 220 14% 22%;
+  --primary: 216 90% 61%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 223 16% 18%;
+  --accent-foreground: 210 25% 94%;
+  --sidebar: 223 18% 12%;
+  --sidebar-foreground: 210 25% 94%;
+  --sidebar-border: 223 15% 24%;
+  --user: 216 87% 57%;
+  --ai: 224 16% 16%;
+  --shadow: 220 50% 2%;
+}

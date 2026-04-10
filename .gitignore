@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+uploads/*
+docs/
+
+# 环境变量与本地密钥
+.env
+.env.*
+!.env*.example
+!.env.server.example
+.env.server
+server/modelSecrets.local.json
+server/data/*.json
+!server/data/*.example.json
+
+# 构建/测试缓存
+coverage
+*.tsbuildinfo
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
