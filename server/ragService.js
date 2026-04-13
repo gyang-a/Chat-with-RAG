@@ -102,6 +102,18 @@ function getRagContextTopK() {
   return Math.max(1, Number(process.env.RAG_CONTEXT_TOP_K || 6))
 }
 
+function getRagKeywordRecallLimit() {
+  return Math.max(1, Number(process.env.RAG_KEYWORD_RECALL_LIMIT || 120))
+}
+
+function getRagKeywordRecallMinHits() {
+  return Math.max(1, Number(process.env.RAG_KEYWORD_RECALL_MIN_HITS || 1))
+}
+
+function getRagKeywordRecallMaxTerms() {
+  return Math.max(1, Number(process.env.RAG_KEYWORD_RECALL_MAX_TERMS || 64))
+}
+
 // 将数值限制在 0 到 1 区间，避免评分计算越界。
 function clamp01(value) {
   return Math.min(1, Math.max(0, Number(value || 0)))
@@ -902,6 +914,7 @@ export function createRagService({ db, uploadsDir }) {
     await docsCollection.createIndex({ username: 1, docId: 1 }, { unique: true })
     await docsCollection.createIndex({ username: 1, kbId: 1, fileSha1: 1 })
     await chunksCollection.createIndex({ username: 1, kbId: 1, updatedAt: -1 })
+    await chunksCollection.createIndex({ username: 1, kbId: 1, keywords: 1, updatedAt: -1 })
     await chunksCollection.createIndex({ username: 1, kbId: 1, embeddingStatus: 1, updatedAt: -1 })
     await chunksCollection.createIndex({ username: 1, docId: 1, chunkIndex: 1 }, { unique: true })
     await chunksCollection.createIndex({ content: 'text', docName: 'text' }, { default_language: 'none' })
@@ -1382,6 +1395,87 @@ export function createRagService({ db, uploadsDir }) {
         // 某些本地 Mongo 环境可能未启用 text index 查询，失败时记录原因并继续走 recent 兜底链路。
         const reason = String(error?.message || 'unknown error')
         console.warn(`[RAG]文本检索回退至近期召回: ${reason}`)
+      }
+
+      // 关键词粗召回：与全文检索并行补充候选，再统一进入同一重排池。
+      try {
+        const keywordTerms = [...new Set(queryTerms)].filter(Boolean).slice(0, getRagKeywordRecallMaxTerms())
+        if (keywordTerms.length > 0) {
+          const keywordHits = await chunksCollection
+            .find(
+              {
+                username: safeUsername,
+                kbId,
+                keywords: { $in: keywordTerms },
+              },
+              {
+                projection: {
+                  _id: 0,
+                  chunkId: 1,
+                  chunkIndex: 1,
+                  docId: 1,
+                  docName: 1,
+                  sourceUrl: 1,
+                  preview: 1,
+                  content: 1,
+                  keywords: 1,
+                  embedding: 1,
+                  embeddingNorm: 1,
+                  embeddingStatus: 1,
+                  updatedAt: 1,
+                },
+              },
+            )
+            .sort({ updatedAt: -1 })
+            .limit(getRagKeywordRecallLimit())
+            .toArray()
+
+          const minKeywordHits = getRagKeywordRecallMinHits()
+          for (const item of keywordHits) {
+            const keywordSet = new Set(Array.isArray(item?.keywords) ? item.keywords : [])
+            let hitCount = 0
+            for (const term of keywordTerms) {
+              if (keywordSet.has(term)) hitCount += 1
+            }
+            if (hitCount < minKeywordHits) continue
+
+            const overlapScore = hitCount / keywordTerms.length
+            const normalizedContent = String(item?.content || '').toLowerCase()
+            const lexicalScore = lexicalCoverage(normalizedContent, keywordTerms)
+            if (overlapScore > 0 || lexicalScore > 0.08) textSignalHit = true
+
+            const existing = scoredCandidates.get(String(item.chunkId))
+            item._semanticScore = useSemanticRetrieval
+              ? cosineSimilarity(
+                  queryVector,
+                  queryVectorNorm,
+                  item?.embedding || [],
+                  Number(item?.embeddingNorm || 0),
+                )
+              : 0
+            if (existing && Number(existing._semanticScore || 0) > Number(item._semanticScore || 0)) {
+              item._semanticScore = Number(existing._semanticScore || 0)
+            }
+
+            // 给关键词粗召回一个温和的文本分，避免压过全文检索原生 textScore。
+            const keywordTextScore = Math.min(2, overlapScore * 1.5 + lexicalScore * 0.5)
+            item.score = Math.max(Number(item?.score || 0), keywordTextScore)
+
+            const score = scoreChunk({
+              chunk: item,
+              query: safeQuery,
+              queryTerms,
+              textScore: keywordTextScore,
+              pinnedDocIds: pinnedSet,
+            })
+
+            if (!existing || score > Number(existing._ragScore || 0)) {
+              scoredCandidates.set(String(item.chunkId), { ...item, _ragScore: score })
+            }
+          }
+        }
+      } catch {
+        // 关键词粗召回失败不影响主链路，继续后续兜底流程。
       }
     }
 

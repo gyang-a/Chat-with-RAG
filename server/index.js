@@ -799,23 +799,6 @@ function shouldRetryWithAlternateAuth(status, responseText) {
   return code === '1000' || code === '1004'
 }
 
-function extractUpstreamErrorCode(responseText) {
-  const parsed = parseMaybeJSON(responseText)
-  const code = String(parsed?.error?.code || '')
-  return code || 'unknown'
-}
-
-function maskKeyForLog(key = '') {
-  const value = String(key)
-  if (value.length <= 8) return '***'
-  return `${value.slice(0, 4)}***${value.slice(-4)}`
-}
-
-function getStrategyLabel(strategy = '') {
-  if (!strategy) return 'unknown'
-  return strategy
-}
-
 function buildAuthHeaders(baseHeaders, candidate) {
   const headers = { ...baseHeaders }
   if (candidate?.token) {
@@ -1012,15 +995,6 @@ async function pipeOpenAICompatStream({
         ? `${message}\n\n${contextBlocks.join('\n\n=====\n\n')}`
         : message
 
-    if (attachments.length > 0) {
-      console.log('[chat][attachments]', {
-        version: serverVersion,
-        count: attachments.length,
-        names: attachments.map((item) => resolveAttachmentDisplayName(item)),
-        contextLength: attachmentContext.length,
-      })
-    }
-
     const requestBody = JSON.stringify({
       model,
       stream: true,
@@ -1058,16 +1032,6 @@ async function pipeOpenAICompatStream({
       lastFailedText = failedText
       const shouldRetry =
         i < authCandidates.length - 1 && shouldRetryWithAlternateAuth(response.status, failedText)
-
-      console.warn('[upstream][auth-failed]', {
-        version: serverVersion,
-        strategy: getStrategyLabel(usedStrategy),
-        mode: authMode,
-        key: maskKeyForLog(apiKey),
-        status: response.status,
-        code: extractUpstreamErrorCode(failedText),
-        retry: shouldRetry,
-      })
 
       if (!shouldRetry) {
         sendSSE(res, { error: `上游请求失败: ${response.status} ${failedText}` })

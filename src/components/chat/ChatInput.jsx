@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { createId } from '@/lib/utils'
 
 const ALLOWED_TYPES = ['application/pdf', 'text/plain', 'text/markdown']
+const ALLOWED_EXTS = new Set(['pdf', 'txt', 'md'])
 const MAX_FILES = 5
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
@@ -16,6 +17,20 @@ function formatFileSize(size = 0) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function getFileExt(fileName = '') {
+  const lower = String(fileName || '').toLowerCase()
+  const idx = lower.lastIndexOf('.')
+  if (idx < 0) return ''
+  return lower.slice(idx + 1)
+}
+
+function isAllowedChatFile(file) {
+  const mime = String(file?.type || '').toLowerCase()
+  const ext = getFileExt(file?.name || '')
+  // 兼容部分浏览器对 txt 的 file.type 为空字符串的场景。
+  return ALLOWED_TYPES.includes(mime) || ALLOWED_EXTS.has(ext)
 }
 
 export function ChatInput({
@@ -46,19 +61,19 @@ export function ChatInput({
     setPendingFiles((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   }
 
-  // 上传待发送附件并收集后端回传的附件元数据。
-  const uploadPendingFiles = async () => {
-    const filesToUpload = pendingFiles.filter((item) => item.status !== 'success')
-    const uploadedMeta = pendingFiles
-      .filter((item) => item.status === 'success' && item.uploaded)
-      .map((item) => item.uploaded)
+  // 选中文件后立即上传，避免“点击发送时才开始上传”的等待体验。
+  const uploadAcceptedFiles = async (items = []) => {
+    if (!Array.isArray(items) || items.length === 0) return
 
-    // 单文件上传任务：状态写回 pendingFiles，用于前端可视反馈。
     const uploadOne = async (item) => {
-      updatePendingFile(item.id, { status: 'uploading', error: '' })
+      updatePendingFile(item.id, { status: 'uploading', error: '', progress: 0 })
       try {
-        const result = await uploadDocument(item.file)
-        const ext = item.file.name.includes('.') ? item.file.name.split('.').pop()?.toLowerCase() || '' : ''
+        const result = await uploadDocument(item.file, {
+          onProgress: (percent) => {
+            updatePendingFile(item.id, { progress: percent })
+          },
+        })
+        const ext = getFileExt(item.file.name)
         const meta = result?.file
           ? {
               fileId: result.file.fileName,
@@ -83,10 +98,70 @@ export function ChatInput({
               textSnippetTruncated: false,
             }
 
-        updatePendingFile(item.id, { status: 'success', uploaded: meta, error: '' })
+        updatePendingFile(item.id, { status: 'success', uploaded: meta, error: '', progress: 100 })
+      } catch (error) {
+        updatePendingFile(item.id, { status: 'error', error: error.message || '上传失败', progress: 0 })
+      }
+    }
+
+    await Promise.all(items.map((item) => uploadOne(item)))
+  }
+
+  // 上传待发送附件并收集后端回传的附件元数据。
+  const uploadPendingFiles = async () => {
+    const pendingUploading = pendingFiles.filter((item) => item.status === 'uploading').length
+    if (pendingUploading > 0) {
+      throw new Error('附件仍在上传中，请稍候再发送')
+    }
+
+    const filesToUpload = pendingFiles.filter((item) => item.status === 'pending')
+    const uploadedMeta = pendingFiles
+      .filter((item) => item.status === 'success' && item.uploaded)
+      .map((item) => item.uploaded)
+
+    const failedCountBefore = pendingFiles.filter((item) => item.status === 'error').length
+    if (failedCountBefore > 0) {
+      throw new Error('存在上传失败文件，请重试或移除后再发送')
+    }
+
+    // 单文件上传任务：状态写回 pendingFiles，用于前端可视反馈。
+    const uploadOne = async (item) => {
+      updatePendingFile(item.id, { status: 'uploading', error: '', progress: 0 })
+      try {
+        const result = await uploadDocument(item.file, {
+          onProgress: (percent) => {
+            updatePendingFile(item.id, { progress: percent })
+          },
+        })
+        const ext = getFileExt(item.file.name)
+        const meta = result?.file
+          ? {
+              fileId: result.file.fileName,
+              name: result.file.originalName,
+              url: result.file.url,
+              size: result.file.size,
+              mimeType: result.file.mimeType,
+              docId: result.file.docId || '',
+              ext,
+              textSnippet: result.file.textSnippet || '',
+              textSnippetTruncated: Boolean(result.file.textSnippetTruncated),
+            }
+          : {
+              fileId: item.id,
+              name: item.file.name,
+              url: '',
+              size: item.file.size,
+              mimeType: item.file.type,
+              docId: '',
+              ext,
+              textSnippet: '',
+              textSnippetTruncated: false,
+            }
+
+        updatePendingFile(item.id, { status: 'success', uploaded: meta, error: '', progress: 100 })
         return { ok: true, meta }
       } catch (error) {
-        updatePendingFile(item.id, { status: 'error', error: error.message || '上传失败' })
+        updatePendingFile(item.id, { status: 'error', error: error.message || '上传失败', progress: 0 })
         return { ok: false, id: item.id }
       }
     }
@@ -149,8 +224,7 @@ export function ChatInput({
 
     const accepted = []
     for (const file of selected.slice(0, slots)) {
-      const isMd = file.name.toLowerCase().endsWith('.md')
-      if (!ALLOWED_TYPES.includes(file.type) && !isMd) {
+      if (!isAllowedChatFile(file)) {
         toast.error(`文件 ${file.name} 类型不支持，仅支持 PDF/TXT/Markdown`)
         continue
       }
@@ -162,6 +236,7 @@ export function ChatInput({
         id: createId('pending_file'),
         file,
         status: 'pending',
+        progress: 0,
         error: '',
         uploaded: null,
       })
@@ -169,6 +244,10 @@ export function ChatInput({
 
     if (accepted.length > 0) {
       setPendingFiles((prev) => [...prev, ...accepted])
+      // 异步触发即时上传，不阻塞文件选择交互。
+      queueMicrotask(() => {
+        uploadAcceptedFiles(accepted).catch(() => null)
+      })
     }
 
     event.target.value = ''
@@ -181,7 +260,12 @@ export function ChatInput({
 
   // 将失败附件重置为待上传状态，允许用户重试。
   const retryPending = (id) => {
-    updatePendingFile(id, { status: 'pending', error: '' })
+    const target = pendingFiles.find((item) => item.id === id)
+    if (!target) return
+    updatePendingFile(id, { status: 'pending', error: '', progress: 0 })
+    queueMicrotask(() => {
+      uploadAcceptedFiles([{ ...target, status: 'pending', error: '', progress: 0 }]).catch(() => null)
+    })
   }
 
   return (
@@ -194,7 +278,9 @@ export function ChatInput({
                 <div key={item.id} className='group flex max-w-full items-center gap-2 rounded-md bg-card px-2 py-1 text-xs'>
                   <span className='truncate text-foreground'>{item.file.name}</span>
                   <span className='text-muted-foreground'>{formatFileSize(item.file.size)}</span>
-                  {item.status === 'uploading' && <span className='text-primary'>上传中</span>}
+                  {item.status === 'uploading' && (
+                    <span className='text-primary'>上传中 {Number(item.progress || 0)}%</span>
+                  )}
                   {item.status === 'success' && <span className='text-green-600'>已上传</span>}
                   {item.status === 'error' && <span className='text-red-500'>失败</span>}
 
