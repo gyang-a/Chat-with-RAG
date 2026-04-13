@@ -116,6 +116,16 @@ export function useSSEChat() {
       // 无有效内容/无对话ID，直接终止
       if (!finalText || !currentConversationId) return
 
+      // 读取发送前的当前会话历史，供后端构建多轮上下文。
+      const recentMessages = useChatStore
+        .getState()
+        .getCurrentMessages()
+        .map((item) => ({
+          role: String(item?.role || ''),
+          content: String(item?.content || ''),
+        }))
+        .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
+
       // 清空之前的错误信息
       setStreamError('')
       // 2. 将用户消息添加到聊天列表
@@ -194,6 +204,7 @@ export function useSSEChat() {
           message: finalText,
           model,
           attachments,
+          recentMessages,
           retrievalMode,
           signal: controller.signal, // 绑定中断信号
           // 接收后端推送的事件

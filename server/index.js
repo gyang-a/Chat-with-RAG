@@ -52,6 +52,7 @@ const systemPrompt =
 const attachmentTextCache = new Map()
 const preferredAuthStrategyCache = new Map()
 const serverVersion = '2026-03-24-auth-fallback-v4'
+const maxContextMessages = Number(process.env.UPSTREAM_CONTEXT_MAX_MESSAGES || 20)
 let mongodbClient = null
 let usersCollection = null
 let conversationsCollection = null
@@ -456,6 +457,55 @@ function escapeHtml(value = '') {
 
 function splitSafeChunks(text = '', size = 6) {
   return text.match(new RegExp(`.{1,${size}}`, 'g')) || []
+}
+
+function normalizeHistoryMessages(messages = []) {
+  if (!Array.isArray(messages)) return []
+
+  return messages
+    .map((item) => ({
+      role: String(item?.role || '').trim(),
+      content: item?.content == null ? '' : String(item.content).trim(),
+    }))
+    .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
+}
+
+async function loadConversationHistoryMessages({ username, conversationId }) {
+  if (!messagesCollection) return []
+  const safeUsername = String(username || '').trim()
+  const safeConversationId = String(conversationId || '').trim()
+  if (!safeUsername || !safeConversationId) return []
+
+  const list = await messagesCollection
+    .find({ username: safeUsername, conversationId: safeConversationId })
+    .project({ _id: 0, role: 1, content: 1, createdAt: 1 })
+    .sort({ createdAt: 1 })
+    .toArray()
+
+  return normalizeHistoryMessages(list)
+}
+
+function buildUpstreamMessages({ historyMessages = [], userContent = '' }) {
+  const safeUserContent = String(userContent || '').trim()
+  const normalizedHistory = normalizeHistoryMessages(historyMessages)
+  const tailHistory = maxContextMessages > 0
+    ? normalizedHistory.slice(-maxContextMessages)
+    : normalizedHistory
+
+  // 防止历史里已包含当前用户输入时重复拼接同一条消息。
+  const dedupedHistory = [...tailHistory]
+  if (dedupedHistory.length > 0) {
+    const last = dedupedHistory[dedupedHistory.length - 1]
+    if (last.role === 'user' && last.content === safeUserContent) {
+      dedupedHistory.pop()
+    }
+  }
+
+  return [
+    { role: 'system', content: systemPrompt },
+    ...dedupedHistory,
+    { role: 'user', content: safeUserContent },
+  ]
 }
 
 function parseMaybeJSON(text = '') {
@@ -930,6 +980,7 @@ async function pipeOpenAICompatStream({
   endpoint,
   apiKey,
   authMode,
+  historyMessages = [],
   message,
   model,
   attachments = [],
@@ -975,13 +1026,10 @@ async function pipeOpenAICompatStream({
       stream: true,
       temperature: upstreamTemperature,
       top_p: upstreamTopP,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: userContent,
-        },
-      ],
+      messages: buildUpstreamMessages({
+        historyMessages,
+        userContent,
+      }),
     })
 
     let response = null
@@ -1081,6 +1129,7 @@ async function pipeOpenAICompatStream({
 async function pipeGenericSSEJSONStream({
   endpoint,
   conversationId,
+  historyMessages = [],
   message,
   model,
   apiKey,
@@ -1105,7 +1154,14 @@ async function pipeGenericSSEJSONStream({
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ conversationId, message, model, attachments, ragContext }),
+      body: JSON.stringify({
+        conversationId,
+        message,
+        model,
+        attachments,
+        ragContext,
+        historyMessages,
+      }),
       signal: controller.signal,
     })
 
@@ -1516,7 +1572,14 @@ app.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => 
 })
 
 app.post('/api/chat/stream', requireAuth, async (req, res) => {
-  const { conversationId, message, model, attachments = [], retrievalMode = 'hybrid' } = req.body || {}
+  const {
+    conversationId,
+    message,
+    model,
+    attachments = [],
+    recentMessages = [],
+    retrievalMode = 'hybrid',
+  } = req.body || {}
   if (!conversationId || !message) {
     res.status(400).json({ message: 'conversationId 和 message 为必填' })
     return
@@ -1548,6 +1611,12 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
   res.write(': connected\n\n')
 
   const username = String(req.auth?.username || '').trim()
+  const normalizedRecentMessages = normalizeHistoryMessages(recentMessages)
+  const historyMessages =
+    normalizedRecentMessages.length > 0
+      ? normalizedRecentMessages
+      : await loadConversationHistoryMessages({ username, conversationId })
+
   const pinnedDocIds = (attachments || [])
     .map((item) => String(item?.docId || '').trim())
     .filter(Boolean)
@@ -1588,6 +1657,7 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
     await pipeGenericSSEJSONStream({
       endpoint: provider.endpoint,
       conversationId,
+      historyMessages,
       message,
       model: resolvedModel,
       apiKey: provider.apiKey,
@@ -1608,6 +1678,7 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
       endpoint,
       apiKey: provider.apiKey,
       authMode: provider.authMode,
+      historyMessages,
       message,
       model: resolvedModel,
       attachments,

@@ -35,8 +35,35 @@ function normalizeMarkdownContent(value) {
   return ''
 }
 
+function normalizeMathDelimiters(markdown = '') {
+  const text = String(markdown || '')
+  if (!text) return ''
+
+  let next = text
+
+  // 兼容模型输出的 \( ... \) 行内公式写法。
+  next = next.replace(/\\\((.*?)\\\)/gs, (_, inner) => `$${inner}$`)
+
+  // 兼容模型输出的 \[ ... \] 块级公式写法。
+  next = next.replace(/\\\[(.*?)\\\]/gs, (_, inner) => `\n$$\n${inner}\n$$\n`)
+
+  // 兼容被方括号包裹的 LaTeX 环境（例如: [\begin{align*} ... \end{align*}]）。
+  next = next.replace(
+    /\[\s*(\\begin\{[\s\S]*?\\end\{[\w*]+\})\s*\]/g,
+    (_, env) => `\n$$\n${env}\n$$\n`,
+  )
+
+  // 若模型直接输出裸环境（无分隔符），自动补成块级公式。
+  next = next.replace(
+    /(^|\n)(\\begin\{(align\*?|aligned|gather\*?|cases|pmatrix|bmatrix|vmatrix)\}[\s\S]*?\\end\{\3\})(?=\n|$)/g,
+    (_, prefix, env) => `${prefix}$$\n${env}\n$$`,
+  )
+
+  return next
+}
+
 export function MarkdownRenderer({ content }) {
-  const safeContent = normalizeMarkdownContent(content)
+  const safeContent = normalizeMathDelimiters(normalizeMarkdownContent(content))
 
   return (
     <div className='markdown-body text-base leading-7 text-foreground'>
