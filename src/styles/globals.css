@@ -75,3 +75,28 @@ select option {
 .markdown-body pre {
   margin: 0;
 }
+
+.markdown-body {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* 行内公式允许在极窄屏下随文本流换行，避免把气泡宽度顶爆。 */
+.markdown-body .katex {
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* 块级公式保持数学排版完整，超宽时改为横向滚动而不是溢出容器。 */
+.markdown-body .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.2rem;
+}
+
+.markdown-body .katex-display > .katex {
+  white-space: nowrap;
+}
