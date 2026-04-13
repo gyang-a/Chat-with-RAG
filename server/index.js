@@ -1626,7 +1626,6 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
     query: String(message || ''),
     pinnedDocIds,
     retrievalMode: String(retrievalMode || 'hybrid').toLowerCase(),
-    limit: 6,
   })
 
   if (ragPayload.refs.length > 0 || ragPayload.contextDocs.length > 0) {

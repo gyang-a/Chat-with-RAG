@@ -11,8 +11,8 @@ import { PDFParse } from 'pdf-parse'
 import WordExtractor from 'word-extractor'
 
 const DEFAULT_KB_ID = 'default'
-const MAX_CANDIDATES_TEXT = 120
-const MAX_CANDIDATES_RECENT = 240
+const MAX_CANDIDATES_TEXT = 200
+const MAX_CANDIDATES_RECENT = 200
 const DOC_MIME = 'application/msword'
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const wordExtractor = new WordExtractor()
@@ -72,6 +72,34 @@ function getRagRouteMinConfidenceText() {
 
 function getRagRoutePinnedBoostEnabled() {
   return String(process.env.RAG_ROUTE_PINNED_BOOST_ENABLED || 'true').toLowerCase() !== 'false'
+}
+
+function getRagRouteShortQueryHardMaxLen() {
+  return Math.max(1, Number(process.env.RAG_ROUTE_SHORT_QUERY_HARD_MAX_LEN || 2))
+}
+
+function getRagRouteShortQuerySoftMaxLen() {
+  return Math.max(getRagRouteShortQueryHardMaxLen(), Number(process.env.RAG_ROUTE_SHORT_QUERY_SOFT_MAX_LEN || 4))
+}
+
+function getRagRouteShortQueryMaxTerms() {
+  return Math.max(1, Number(process.env.RAG_ROUTE_SHORT_QUERY_MAX_TERMS || 1))
+}
+
+function getRagRouteMinTopScoreText() {
+  return clamp01(Number(process.env.RAG_ROUTE_MIN_TOP_SCORE_TEXT || 0.2))
+}
+
+function getRagRouteMinTopScoreSemantic() {
+  return clamp01(Number(process.env.RAG_ROUTE_MIN_TOP_SCORE_SEMANTIC || 0.24))
+}
+
+function getRagRouteMinTopScoreHybrid() {
+  return clamp01(Number(process.env.RAG_ROUTE_MIN_TOP_SCORE_HYBRID || 0.22))
+}
+
+function getRagContextTopK() {
+  return Math.max(1, Number(process.env.RAG_CONTEXT_TOP_K || 6))
 }
 
 // 将数值限制在 0 到 1 区间，避免评分计算越界。
@@ -231,6 +259,21 @@ async function retrieveVectorCandidates({ chunksCollection, username, kbId, quer
 // 生成稳定 docId/chunkId 所需的 SHA1 哈希。
 function sha1(text = '') {
   return crypto.createHash('sha1').update(String(text)).digest('hex')
+}
+
+async function sha1File(filePath = '') {
+  const safePath = String(filePath || '').trim()
+  if (!safePath) return ''
+  const buffer = await fs.promises.readFile(safePath)
+  return crypto.createHash('sha1').update(buffer).digest('hex')
+}
+
+function buildStableDocId({ username = '', kbId = DEFAULT_KB_ID, fileSha1 = '', storedFileName = '' }) {
+  const safeUsername = String(username || '').trim()
+  const safeKbId = String(kbId || DEFAULT_KB_ID).trim() || DEFAULT_KB_ID
+  const safeFileSha1 = String(fileSha1 || '').trim()
+  const safeStoredFileName = String(storedFileName || '').trim()
+  return sha1(`${safeUsername}:${safeKbId}:${safeFileSha1 || safeStoredFileName}`)
 }
 
 // 文本归一化：清理空字节、换行与多余空白，便于后续切块与检索。
@@ -491,7 +534,40 @@ function estimateRagConfidence({ chunk, query = '', queryTerms = [], mode = 'hyb
     return clamp01(semanticScore * 0.7 + overlapScore * 0.1 + lexicalScore * 0.1 + phraseScore * 0.1)
   }
 
-  return clamp01(overlapScore * 0.25 + lexicalScore * 0.25 + semanticScore * 0.3 + phraseScore * 0.1 + textScore * 0.1)
+  return clamp01(overlapScore * 0.15 + lexicalScore * 0.15 + semanticScore * 0.5 + phraseScore * 0.1 + textScore * 0.1)
+}
+
+function shouldForceDirectAnswer(query = '') {
+  const text = String(query || '').trim()
+  if (!text) return false
+
+  // 用户在“改话题/停止某主题”时，不应继续强制检索旧知识库内容。
+  const topicSwitchPattern = /(不要再|别再|不再|不用|不需要|停止|别说|不要说|换个话题|换话题|不谈|别聊)/
+  if (!topicSwitchPattern.test(text)) return false
+
+  // 若同时包含明确提问意图，则仍允许进入检索链路。
+  const explicitQuestionPattern = /(什么|如何|怎么|为什么|是否|多少|几|哪|请解释|介绍|原理|步骤|\?|？)/
+  return !explicitQuestionPattern.test(text)
+}
+
+function isShortAmbiguousQuery(query = '', queryTerms = []) {
+  const text = String(query || '').trim()
+  if (!text) return true
+
+  const compact = text.replace(/\s+/g, '')
+  const safeTerms = Array.isArray(queryTerms) ? queryTerms.filter(Boolean) : []
+  const hardMaxLen = getRagRouteShortQueryHardMaxLen()
+  const softMaxLen = getRagRouteShortQuerySoftMaxLen()
+  const maxTerms = getRagRouteShortQueryMaxTerms()
+
+  // 极短输入（如“无人”“电机”）语义不完整，检索容易被误召回放大。
+  if (compact.length <= hardMaxLen) return true
+
+  // 具备明确提问/任务意图时，允许继续检索链路。
+  const explicitIntentPattern = /(什么|如何|怎么|为什么|是否|区别|对比|介绍|解释|原理|步骤|总结|概述|给我|请|帮我|\?|？)/
+  if (explicitIntentPattern.test(compact)) return false
+
+  return compact.length <= softMaxLen && safeTerms.length <= maxTerms
 }
 // 切块函数：按语义断点优先切分，并保留 overlap 提升上下文连续性。
 function splitIntoChunks(text = '', chunkSize = 520, overlap = 90) {
@@ -624,6 +700,139 @@ export function createRagService({ db, uploadsDir }) {
   const queuedIngestJobKeys = new Set()
   const pendingIngestJobs = []
 
+  async function findExistingDocByFileSha1({ username, kbId = DEFAULT_KB_ID, fileSha1 }) {
+    const safeUsername = String(username || '').trim()
+    const safeKbId = String(kbId || DEFAULT_KB_ID).trim() || DEFAULT_KB_ID
+    const safeFileSha1 = String(fileSha1 || '').trim()
+    if (!safeUsername || !safeFileSha1) return null
+
+    const activeStatuses = ['queued', 'parsing', 'indexed']
+    const projection = {
+      _id: 0,
+      docId: 1,
+      kbId: 1,
+      parseStatus: 1,
+      parseError: 1,
+      chunkCount: 1,
+      storedFileName: 1,
+      updatedAt: 1,
+    }
+
+    const exact = await docsCollection.findOne(
+      {
+        username: safeUsername,
+        kbId: safeKbId,
+        fileSha1: safeFileSha1,
+        parseStatus: { $in: activeStatuses },
+      },
+      {
+        projection,
+        sort: { updatedAt: -1 },
+      },
+    )
+    if (exact?.docId) return exact
+
+    // 兼容历史老数据：部分文档在去重功能上线前没有 fileSha1，按文件内容回填后再判重。
+    const legacyCandidates = await docsCollection
+      .find(
+        {
+          username: safeUsername,
+          kbId: safeKbId,
+          parseStatus: { $in: activeStatuses },
+          $or: [
+            { fileSha1: { $exists: false } },
+            { fileSha1: null },
+            { fileSha1: '' },
+          ],
+        },
+        { projection },
+      )
+      .sort({ updatedAt: -1 })
+      .limit(120)
+      .toArray()
+
+    for (const item of legacyCandidates) {
+      const storedFileName = String(item?.storedFileName || '')
+      if (!storedFileName || !uploadsDir) continue
+      const candidatePath = path.resolve(uploadsDir, storedFileName)
+      if (!candidatePath.startsWith(uploadsDir) || !fs.existsSync(candidatePath)) continue
+
+      let candidateSha1 = ''
+      try {
+        candidateSha1 = await sha1File(candidatePath)
+      } catch {
+        candidateSha1 = ''
+      }
+      if (!candidateSha1) continue
+
+      await docsCollection.updateOne(
+        { username: safeUsername, docId: String(item.docId || '') },
+        { $set: { fileSha1: candidateSha1 } },
+      )
+
+      if (candidateSha1 === safeFileSha1) {
+        return {
+          ...item,
+          fileSha1: candidateSha1,
+        }
+      }
+    }
+
+    return null
+  }
+
+  async function collapseDuplicateDocsByFileSha1({
+    username,
+    kbId = DEFAULT_KB_ID,
+    fileSha1,
+    keepDocId,
+    keepStoredFileName = '',
+  }) {
+    const safeUsername = String(username || '').trim()
+    const safeKbId = String(kbId || DEFAULT_KB_ID).trim() || DEFAULT_KB_ID
+    const safeFileSha1 = String(fileSha1 || '').trim()
+    const safeKeepDocId = String(keepDocId || '').trim()
+    if (!safeUsername || !safeFileSha1 || !safeKeepDocId) return
+
+    const duplicates = await docsCollection
+      .find(
+        {
+          username: safeUsername,
+          kbId: safeKbId,
+          fileSha1: safeFileSha1,
+          docId: { $ne: safeKeepDocId },
+        },
+        { projection: { _id: 0, docId: 1, storedFileName: 1 } },
+      )
+      .toArray()
+
+    const duplicateDocIds = duplicates.map((item) => String(item?.docId || '')).filter(Boolean)
+    if (duplicateDocIds.length === 0) return
+
+    await docsCollection.deleteMany({
+      username: safeUsername,
+      kbId: safeKbId,
+      docId: { $in: duplicateDocIds },
+    })
+    await chunksCollection.deleteMany({
+      username: safeUsername,
+      kbId: safeKbId,
+      docId: { $in: duplicateDocIds },
+    })
+
+    // 清理重复记录关联的冗余文件，保留当前主记录对应文件。
+    if (uploadsDir) {
+      const safeKeepStoredFileName = String(keepStoredFileName || '').trim()
+      for (const item of duplicates) {
+        const stored = String(item?.storedFileName || '').trim()
+        if (!stored || stored === safeKeepStoredFileName) continue
+        const filePath = path.resolve(uploadsDir, stored)
+        if (!filePath.startsWith(uploadsDir) || !fs.existsSync(filePath)) continue
+        await fs.promises.unlink(filePath).catch(() => null)
+      }
+    }
+  }
+
   // 消费入库队列并控制并发，避免高并发解析拖垮服务。
   function runNextIngestJobs() {
     while (runningIngestJobKeys.size < getMaxIngestConcurrency() && pendingIngestJobs.length > 0) {
@@ -649,6 +858,7 @@ export function createRagService({ db, uploadsDir }) {
     docId,
     name,
     storedFileName,
+    fileSha1 = '',
     mimeType,
     ext,
     size,
@@ -668,6 +878,7 @@ export function createRagService({ db, uploadsDir }) {
           docId,
           name,
           storedFileName,
+          fileSha1: String(fileSha1 || ''),
           mimeType,
           ext,
           size,
@@ -689,6 +900,7 @@ export function createRagService({ db, uploadsDir }) {
   async function ensureIndexes() {
     await docsCollection.createIndex({ username: 1, kbId: 1, updatedAt: -1 })
     await docsCollection.createIndex({ username: 1, docId: 1 }, { unique: true })
+    await docsCollection.createIndex({ username: 1, kbId: 1, fileSha1: 1 })
     await chunksCollection.createIndex({ username: 1, kbId: 1, updatedAt: -1 })
     await chunksCollection.createIndex({ username: 1, kbId: 1, embeddingStatus: 1, updatedAt: -1 })
     await chunksCollection.createIndex({ username: 1, docId: 1, chunkIndex: 1 }, { unique: true })
@@ -700,6 +912,8 @@ export function createRagService({ db, uploadsDir }) {
     filePath,
     storedFileName,
     originalName,
+    docId: upstreamDocId = '',
+    fileSha1 = '',
     mimeType,
     size,
     url,
@@ -710,7 +924,13 @@ export function createRagService({ db, uploadsDir }) {
       throw new Error('缺少用户名，无法入库知识文档')
     }
 
-    const docId = sha1(`${safeUsername}:${storedFileName}`)
+    const safeFileSha1 = String(fileSha1 || '').trim()
+    const docId = String(upstreamDocId || buildStableDocId({
+      username: safeUsername,
+      kbId,
+      fileSha1: safeFileSha1,
+      storedFileName,
+    }))
     const ext = path.extname(String(originalName || storedFileName || '')).toLowerCase()
     const docName = String(originalName || storedFileName || '未命名文档')
     const safeMimeType = String(mimeType || '')
@@ -724,6 +944,7 @@ export function createRagService({ db, uploadsDir }) {
       docId,
       name: docName,
       storedFileName: String(storedFileName || ''),
+      fileSha1: safeFileSha1,
       mimeType: safeMimeType,
       ext,
       size: safeSize,
@@ -779,6 +1000,7 @@ export function createRagService({ db, uploadsDir }) {
       docId,
       name: docName,
       storedFileName: String(storedFileName || ''),
+      fileSha1: safeFileSha1,
       mimeType: safeMimeType,
       ext,
       size: safeSize,
@@ -840,6 +1062,8 @@ export function createRagService({ db, uploadsDir }) {
     filePath,
     storedFileName,
     originalName,
+    docId: upstreamDocId = '',
+    fileSha1,
     mimeType,
     size,
     url,
@@ -850,8 +1074,51 @@ export function createRagService({ db, uploadsDir }) {
       throw new Error('缺少用户名，无法入库知识文档')
     }
 
-    const docId = sha1(`${safeUsername}:${storedFileName}`)
+    const safeFileSha1 = String(fileSha1 || '').trim() || await sha1File(filePath)
+    const docId = String(upstreamDocId || buildStableDocId({
+      username: safeUsername,
+      kbId,
+      fileSha1: safeFileSha1,
+      storedFileName,
+    }))
     const ext = path.extname(String(originalName || storedFileName || '')).toLowerCase()
+
+    if (safeFileSha1) {
+      const existed = await findExistingDocByFileSha1({
+        username: safeUsername,
+        kbId,
+        fileSha1: safeFileSha1,
+      })
+
+      if (existed?.docId) {
+        await collapseDuplicateDocsByFileSha1({
+          username: safeUsername,
+          kbId,
+          fileSha1: safeFileSha1,
+          keepDocId: String(existed.docId || ''),
+          keepStoredFileName: String(existed.storedFileName || ''),
+        })
+
+        // 命中重复文档时，清理本次上传副本，避免磁盘和向量重复占用。
+        const duplicatedPath = path.resolve(uploadsDir, String(storedFileName || ''))
+        const existedPath = path.resolve(uploadsDir, String(existed.storedFileName || ''))
+        if (duplicatedPath !== existedPath && duplicatedPath.startsWith(uploadsDir) && fs.existsSync(duplicatedPath)) {
+          fs.unlink(duplicatedPath, () => null)
+        }
+
+        return {
+          docId: String(existed.docId),
+          kbId: String(existed.kbId || kbId),
+          parseStatus: String(existed.parseStatus || 'indexed'),
+          parseError: String(existed.parseError || ''),
+          chunkCount: Number(existed.chunkCount || 0),
+          indexed: String(existed.parseStatus || '') === 'indexed',
+          textSnippet: '',
+          textSnippetTruncated: false,
+          deduplicated: true,
+        }
+      }
+    }
 
     // 先写入 queued，接口可立即返回，解析在后台继续。
     await upsertDocMeta({
@@ -860,6 +1127,7 @@ export function createRagService({ db, uploadsDir }) {
       docId,
       name: String(originalName || storedFileName || '未命名文档'),
       storedFileName: String(storedFileName || ''),
+      fileSha1: safeFileSha1,
       mimeType: String(mimeType || ''),
       ext,
       size: Number(size || 0),
@@ -870,7 +1138,9 @@ export function createRagService({ db, uploadsDir }) {
       charCount: 0,
     })
 
-    const jobKey = `${safeUsername}:${docId}`
+    const jobKey = safeFileSha1
+      ? `${safeUsername}:${String(kbId || DEFAULT_KB_ID)}:sha1:${safeFileSha1}`
+      : `${safeUsername}:${docId}`
     if (!runningIngestJobKeys.has(jobKey) && !queuedIngestJobKeys.has(jobKey)) {
       if (pendingIngestJobs.length >= getMaxIngestQueueSize()) {
         throw new Error('知识库解析队列繁忙，请稍后再试')
@@ -886,6 +1156,8 @@ export function createRagService({ db, uploadsDir }) {
               filePath,
               storedFileName,
               originalName,
+              docId,
+              fileSha1: safeFileSha1,
               mimeType,
               size,
               url,
@@ -898,6 +1170,7 @@ export function createRagService({ db, uploadsDir }) {
               docId,
               name: String(originalName || storedFileName || '未命名文档'),
               storedFileName: String(storedFileName || ''),
+              fileSha1: safeFileSha1,
               mimeType: String(mimeType || ''),
               ext,
               size: Number(size || 0),
@@ -951,8 +1224,10 @@ export function createRagService({ db, uploadsDir }) {
     pinnedDocIds = [],
     kbId = DEFAULT_KB_ID,
     retrievalMode = 'hybrid',
-    limit = 6,
+    limit,
   }) {
+      const contextTopK = Math.max(1, Number(limit || getRagContextTopK()))
+
     const safeUsername = String(username || '').trim()
     const safeQuery = normalizeText(query)
     const mode = ['text', 'semantic', 'hybrid', 'direct'].includes(String(retrievalMode || '').toLowerCase())
@@ -977,8 +1252,18 @@ export function createRagService({ db, uploadsDir }) {
         retrievalModeUsed: 'none',
       }
     }
+
+    if (shouldForceDirectAnswer(safeQuery)) {
+      return {
+        refs: [],
+        contextDocs: [],
+        promptContext: '',
+        retrievalModeUsed: 'none',
+      }
+    }
   // 构建查询词集合，供后续多策略评分使用。
     const queryTerms = buildKeywordSet(safeQuery)
+    const shortAmbiguousQuery = isShortAmbiguousQuery(safeQuery, queryTerms)
     const pinnedSet = new Set((Array.isArray(pinnedDocIds) ? pinnedDocIds : []).map((item) => String(item)))
     // 模式选择：文本、语义、混合。
     const useTextRetrieval = mode === 'text' || mode === 'hybrid'
@@ -1162,23 +1447,37 @@ export function createRagService({ db, uploadsDir }) {
 
     const topChunks = [...scoredCandidates.values()]
       .sort((a, b) => Number(b._ragScore || 0) - Number(a._ragScore || 0))
-      .slice(0, Math.max(1, Number(limit || 6)))
+      .slice(0, contextTopK)
+      .map((item) => ({
+        ...item,
+        // 统一对外展示口径：routeConfidence 与路由判定阈值保持一致。
+        _routeConfidence: estimateRagConfidence({
+          chunk: item,
+          query: safeQuery,
+          queryTerms,
+          mode,
+        }),
+      }))
 
     const hasRagEvidence = topChunks.length > 0
     const topChunk = topChunks[0] || null
-    const topConfidence = estimateRagConfidence({
-      chunk: topChunk,
-      query: safeQuery,
-      queryTerms,
-      mode,
-    })
+    const topRagScore = Number(topChunk?._ragScore || 0)
+    const topConfidence = clamp01(Number(topChunk?._routeConfidence || 0))
     const pinnedMatched = topChunks.some((item) => pinnedSet.has(String(item?.docId || '')))
     const minConfidence = mode === 'text' ? getRagRouteMinConfidenceText() : getRagRouteMinConfidence()
+    const minTopScore =
+      mode === 'text'
+        ? getRagRouteMinTopScoreText()
+        : mode === 'semantic'
+          ? getRagRouteMinTopScoreSemantic()
+          : getRagRouteMinTopScoreHybrid()
     // 路由策略：仅在检索证据置信度达标（或命中用户手动钉住文档）时才注入RAG上下文。
     // 文本模式更偏向“命中即用”，阈值单独放低，避免知识库问答被误判为模型直答。
     const shouldUseRag =
       hasRagEvidence &&
-      (topConfidence >= minConfidence || textSignalHit || (getRagRoutePinnedBoostEnabled() && pinnedMatched))
+      !shortAmbiguousQuery &&
+      (topConfidence >= minConfidence || (getRagRoutePinnedBoostEnabled() && pinnedMatched)) &&
+      (topRagScore >= minTopScore || (getRagRoutePinnedBoostEnabled() && pinnedMatched))
 
     // 根据检索命中信号确定最终展示给前端的检索模式标签。
     const resolveModeUsed = () => {
@@ -1219,7 +1518,7 @@ export function createRagService({ db, uploadsDir }) {
         snippet: item.preview || item.content || '',
         docName: item.docName || '未命名文档',
       }),
-      score: Number(item._ragScore || 0),
+      score: clamp01(Number(item._routeConfidence || 0)),
       docId: String(item.docId || ''),
       chunkId: String(item.chunkId || ''),
       name: String(item.docName || '未命名文档'),
@@ -1234,7 +1533,7 @@ export function createRagService({ db, uploadsDir }) {
         score: 0,
         hitChunks: 0,
       }
-      current.score = Math.max(current.score, Number(item._ragScore || 0))
+      current.score = Math.max(current.score, clamp01(Number(item._routeConfidence || 0)))
       current.hitChunks += 1
       docAgg.set(key, current)
     }
@@ -1380,6 +1679,7 @@ export function createRagService({ db, uploadsDir }) {
       filePath,
       storedFileName: String(doc.storedFileName || ''),
       originalName: String(doc.name || doc.storedFileName || '未命名文档'),
+      docId: safeDocId,
       mimeType: String(doc.mimeType || ''),
       size: Number(doc.size || 0),
       url: String(doc.url || ''),
