@@ -1,5 +1,7 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\lib\sanitize.js
+
+//用户问题清洗
 export function sanitizeUserInput(input = '') {
   return input
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')

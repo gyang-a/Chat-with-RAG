@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 
 export function useHotkeys({ onNewConversation, onSend }) {
   const callbacksRef = useRef({ onNewConversation, onSend })
-  
   // 保持回调引用最新，避免依赖项变化导致重新绑定
   useEffect(() => {
     callbacksRef.current = { onNewConversation, onSend }

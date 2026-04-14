@@ -331,15 +331,16 @@ function decodeBestEffort(buffer) {
     })
     .map((item) => item.text)[0]
 }
-// 分词函数：面向中英文混合文本提取可检索词项。
-function tokenize(text = '') {
-  const normalized = String(text || '').toLowerCase()
+// 使用内置分词器（若运行时支持）提升中文词边界识别。
+const zhWordSegmenter =
+  typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter('zh-Hans', { granularity: 'word' })
+    : null
+
+// 中文分词兜底：当内置分词不可用时，退回到双字切分。
+function tokenizeChineseFallback(normalizedText = '') {
   const terms = []
-
-  const wordMatches = normalized.match(/[a-z0-9]{2,}/g) || []
-  terms.push(...wordMatches)
-
-  const cjkBlocks = normalized.match(/[\u4e00-\u9fff]{2,}/g) || []
+  const cjkBlocks = String(normalizedText || '').match(/[\u4e00-\u9fff]{2,}/g) || []
   for (const block of cjkBlocks) {
     if (block.length <= 2) {
       terms.push(block)
@@ -349,12 +350,50 @@ function tokenize(text = '') {
       terms.push(block.slice(i, i + 2))
     }
   }
+  return terms
+}
+
+// 生成“原始词流”（保留重复），用于后续频次统计。
+function collectTokenStream(text = '') {
+  const normalized = String(text || '').toLowerCase()
+  const terms = []
+
+  // 英文词支持连字符，如 ai-agent、real-time；纯连字符或过短词会被过滤。
+  const englishMatches = normalized.match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) || []
+  for (const word of englishMatches) {
+    const compact = word.replace(/-/g, '')
+    if (compact.length >= 2) {
+      terms.push(word)
+    }
+  }
+
+  if (zhWordSegmenter) {
+    for (const piece of zhWordSegmenter.segment(normalized)) {
+      const segment = String(piece?.segment || '').trim()
+      const hasCjk = /[\u4e00-\u9fff]/.test(segment)
+      if (!hasCjk) continue
+      if (piece?.isWordLike === false) continue
+      if (segment.length >= 2) {
+        terms.push(segment)
+      }
+    }
+  } else {
+    terms.push(...tokenizeChineseFallback(normalized))
+  }
 
   return terms
 }
+
+// 分词函数：返回去重词项，便于后续快速匹配。
+function tokenize(text = '') {
+  return [...new Set(collectTokenStream(text))]
+}
 // 构建关键词集合：按频次截断，作为轻量检索特征。
 function buildKeywordSet(text = '') {
-  const terms = tokenize(text)
+  const dedupedTerms = tokenize(text)
+  if (dedupedTerms.length === 0) return []
+
+  const terms = collectTokenStream(text)
   const freq = new Map()
   for (const term of terms) {
     freq.set(term, (freq.get(term) || 0) + 1)
@@ -427,12 +466,12 @@ function repairExtractedText(text = '') {
   try {
     candidates.push(Buffer.from(normalized, 'latin1').toString('utf8'))
   } catch {
-    // ignore transform failure
+    // 忽略转换失败
   }
   try {
     candidates.push(iconv.decode(Buffer.from(normalized, 'latin1'), 'gb18030'))
   } catch {
-    // ignore transform failure
+    // 忽略转换失败
   }
 
   const deduped = [...new Set(candidates.map((item) => normalizeText(item)).filter(Boolean))]
@@ -1081,6 +1120,7 @@ export function createRagService({ db, uploadsDir }) {
     size,
     url,
     kbId = DEFAULT_KB_ID,
+    bypassDedup = false,
   }) {
     const safeUsername = String(username || '').trim()
     if (!safeUsername) {
@@ -1096,7 +1136,8 @@ export function createRagService({ db, uploadsDir }) {
     }))
     const ext = path.extname(String(originalName || storedFileName || '')).toLowerCase()
 
-    if (safeFileSha1) {
+    // 重建索引场景可显式跳过去重短路，确保重新切块与关键词重算。
+    if (safeFileSha1 && !bypassDedup) {
       const existed = await findExistingDocByFileSha1({
         username: safeUsername,
         kbId,
@@ -1778,6 +1819,7 @@ export function createRagService({ db, uploadsDir }) {
       size: Number(doc.size || 0),
       url: String(doc.url || ''),
       kbId,
+      bypassDedup: true,
     })
   }
 
