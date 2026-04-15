@@ -41,14 +41,15 @@ function normalizeDeltaText(value) {
 
 // 预估流式文本展示高度时使用的字体与布局参数（需与消息气泡样式尽量保持一致）
 const STREAM_LAYOUT_FONT = '400 14px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif'
-const STREAM_LAYOUT_LINE_HEIGHT = 28
-const STREAM_LAYOUT_MAX_WIDTH = 700
-const STREAM_LAYOUT_PADDING_Y = 24
-const STREAM_LAYOUT_MIN_HEIGHT = 46
-const STREAM_FLUSH_MIN_INTERVAL = 56
-const STREAM_MEASURE_MIN_INTERVAL = 420
-const STREAM_HEIGHT_UPDATE_THRESHOLD = 20
+const STREAM_LAYOUT_LINE_HEIGHT = 28  //行高，影响文本高度计算，需根据实际消息气泡样式调整
+const STREAM_LAYOUT_MAX_WIDTH = 700  // 流式文本最大宽度，需根据实际消息气泡样式调整，影响换行和高度计算
+const STREAM_LAYOUT_PADDING_Y = 24   // 上下内边距总和，影响最小高度计算
+const STREAM_LAYOUT_MIN_HEIGHT = 46  // 最小高度，保证气泡初始状态不至于过于扁平
+const STREAM_FLUSH_MIN_INTERVAL = 56 // 流式文本最小刷新间隔，单位ms，过短可能导致性能问题，过长可能感觉卡顿，需根据实际测试调整
+const STREAM_MEASURE_MIN_INTERVAL = 120   // 流式文本高度测量的最小间隔，单位ms，避免过于频繁测量导致性能问题
+const STREAM_HEIGHT_UPDATE_THRESHOLD = 8 // 仅当高度变化超过8px时才更新，避免频繁微调导致的视觉抖动
 
+// 预估流式文本的展示高度，动态调整消息气泡大小，提升视觉体验。
 function estimateStreamingHeight(text = '') {
   if (!text) return STREAM_LAYOUT_MIN_HEIGHT
 
@@ -340,4 +341,5 @@ export function useSSEChat() {
     stopGenerating,   // 停止生成
     regenerateLast,   // 重新生成最后一条回复
   }
+
 }
