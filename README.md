@@ -1,5 +1,5 @@
 
-                       基于 RAG 技术的私有文档知识库问答系统
+基于 RAG 技术的私有文档知识库问答系统
 
 基于 RAG（检索增强生成） 架构实现私有文档智能问答系统，支持用户上传个人文档并构建专属知识库。系统对文档进行智能分块与结构化存储，同时构建文本索引与向量表征，依托 MongoDB 实现混合存储与高效检索。
 
@@ -26,9 +26,9 @@ Markdown 与代码渲染：react-markdown + remark-gfm + remark-math + rehype-ka
 运行时与模块：Node.js（ESM）
 Web 框架：Express 5
 中间件：cors、compression、multer、dotenv
-数据库：MongoDB（mongodb 官方驱动）
+数据库：MongoDB
 文件与文本处理：pdf-parse、mammoth、word-extractor、iconv-lite、jschardet
-鉴权与安全相关：基于 crypto 的令牌/签名逻辑（项目内实现）
+鉴权与安全相关：基于 crypto 的令牌/签名逻辑
 接口能力：SSE 流式聊天代理、文件上传、会话与消息持久化、RAG 服务（项目内模块）
 ## 启动
 
