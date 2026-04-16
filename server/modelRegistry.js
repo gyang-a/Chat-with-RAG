@@ -35,10 +35,17 @@ function toOpenAICompatEndpoint(url = '') {
 // value.mode 可选：openai | deepseek | sse_json，默认 openai
 // value.authMode 可选：auto | bearer | zhipu-jwt，默认 auto（sse_json 默认 bearer）
 export const MODEL_CATALOG = {
-  'GLM-4.7Flash': {
+  'GLM-5.1': {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     apiKey: '',
-    model: 'glm-4-flash',
+    model: 'glm-5.1',
+    mode: 'openai',
+    authMode: 'zhipu-jwt',
+  },
+  'GLM-4.7-Flash': {
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    apiKey: '',
+    model: 'glm-4.7-flash',
     mode: 'openai',
     authMode: 'zhipu-jwt',
   },
@@ -58,7 +65,7 @@ export const MODEL_CATALOG = {
   },
 }
 
-export const DEFAULT_MODEL = 'GLM-4.7Flash'
+export const DEFAULT_MODEL = 'GLM-5.1'
 
 function normalizeMode(rawMode) {
   // 归一化 provider 模式，未知值默认回退 openai。
