@@ -51,7 +51,7 @@ export const MODEL_CATALOG = {
   }
 }
 
-export const DEFAULT_MODEL = 'GLM-5.1'
+export const DEFAULT_MODEL = 'MiniMax-M2.7'
 
 function normalizeMode(rawMode) {
   // 归一化 provider 模式，未知值默认回退 openai。
