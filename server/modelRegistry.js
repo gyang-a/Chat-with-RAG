@@ -48,13 +48,6 @@ export const MODEL_CATALOG = {
     model: 'glm-4.7-flash',
     mode: 'openai',
     authMode: 'zhipu-jwt',
-  },
-  'DeepSeek': {
-    endpoint: 'https://api.deepseek.com/chat/completions',
-    apiKey: '',
-    model: 'deepseek-chat',
-    mode: 'deepseek',
-    authMode: 'bearer',
   }
 }
 

@@ -4,6 +4,7 @@ import { ChevronDown, Info } from 'lucide-react'
 import { KnowledgeBasePanel } from '@/components/panel/KnowledgeBasePanel'
 import { fetchKbDocuments } from '@/services/kbApi'
 import { useChatStore } from '@/stores/chatStore'
+import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
 
@@ -32,6 +33,7 @@ export function AuxPanel({ mobile = false }) {
   const conversation = useChatStore((s) => s.getCurrentConversation())
   const [showManager, setShowManager] = useState(false)
   const [stats, setStats] = useState({ docCount: 0, chunkCount: 0, updatedAt: 0 })
+  const [embeddingModelName, setEmbeddingModelName] = useState('')
 
   const refs = useMemo(() => conversation?.refs || [], [conversation?.refs])
   const docs = useMemo(() => conversation?.contextDocs || [], [conversation?.contextDocs])
@@ -55,10 +57,37 @@ export function AuxPanel({ mobile = false }) {
       })
       .catch(() => null)
 
+    // 获取当前有效的嵌入模型配置
+    fetch('/api/embedding-config', { headers: useAuthStore.getState().token ? { Authorization: `Bearer ${useAuthStore.getState().token}` } : {} })
+      .then((r) => r?.json())
+      .then((data) => {
+        if (cancelled || !data?.ok) return
+        setEmbeddingModelName(data.configured ? data.model : '')
+      })
+      .catch(() => null)
+
     return () => {
       cancelled = true
     }
   }, [mobile, rightPanelOpen])
+
+  // 监听嵌入模型配置变更事件
+  useEffect(() => {
+    const handleEmbModelsUpdated = () => {
+      fetch('/api/embedding-config', { headers: useAuthStore.getState().token ? { Authorization: `Bearer ${useAuthStore.getState().token}` } : {} })
+        .then((r) => r?.json())
+        .then((data) => {
+          if (!data?.ok) return
+          setEmbeddingModelName(data.configured ? data.model : '')
+        })
+        .catch(() => null)
+    }
+
+    window.addEventListener('kria:embedding-models-updated', handleEmbModelsUpdated)
+    return () => {
+      window.removeEventListener('kria:embedding-models-updated', handleEmbModelsUpdated)
+    }
+  }, [])
 
   const results = useMemo(() => {
     const fromRefs = refs.map((item, index) => ({
@@ -193,7 +222,7 @@ export function AuxPanel({ mobile = false }) {
           </p>
           <p className='flex items-center justify-between'>
             <span>嵌入模型</span>
-            <span className='font-semibold text-foreground'>text-embedding-3-large</span>
+            <span className='font-semibold text-foreground'>{embeddingModelName || '未配置'}</span>
           </p>
         </div>
       </section>

@@ -59,11 +59,11 @@ export function Sidebar({ mobile = false }) {
         <div className='mb-4 flex items-center justify-between'>
           <div className='flex items-center gap-2 overflow-hidden px-1'>
             <img
-              src='/favicon.png'
-              alt='ChatAI'
+              src='/assistant.png'
+              alt='灵犀'
               className='h-8 w-8 shrink-0 rounded-xl object-cover shadow-sm'
             />
-            {!collapsed && <span className='truncate text-[19px] font-semibold tracking-tight'>ChatAI</span>}
+            {!collapsed && <span className='truncate text-[19px] font-semibold tracking-tight'>灵犀</span>}
           </div>
 
           {!mobile && (

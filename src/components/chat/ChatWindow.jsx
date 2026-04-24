@@ -43,7 +43,7 @@ export function ChatWindow({
         {messages.length === 0 ? (
           <div className='mx-auto flex h-full w-full max-w-[1050px] flex-col items-center justify-center px-5'>
             <h2 className='bg-gradient-to-r from-[#3f5eff] to-[#429ef8] bg-clip-text text-4xl font-semibold text-transparent'>
-              你好，我是 ChatAI
+              你好，我是灵犀
             </h2>
             <p className='mt-3 text-sm text-muted-foreground'>今天想一起聊点什么？</p>
             <div className='mt-6 grid w-full max-w-[760px] grid-cols-1 gap-3 sm:grid-cols-2'>

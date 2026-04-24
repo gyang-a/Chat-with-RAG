@@ -124,6 +124,34 @@ function isEmbeddingEnabled() {
   return Boolean(getEmbeddingApiUrl() && getEmbeddingModel())
 }
 
+// 获取用户的嵌入配置，优先使用用户自定义配置，否则回退到全局环境变量。
+async function getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels) {
+  if (username && typeof fnGetUserCustomEmbeddingModels === 'function') {
+    try {
+      const userModels = await fnGetUserCustomEmbeddingModels(username)
+      if (userModels && userModels.length > 0) {
+        // 优先使用默认模型
+        const defaultModel = userModels.find((m) => m.isDefault)
+        const m = defaultModel || userModels[0]
+        return {
+          apiUrl: m.endpoint,
+          apiKey: m.apiKey,
+          model: m.name,
+          enabled: Boolean(m.endpoint && m.name),
+        }
+      }
+    } catch (err) {
+      console.warn(`[RAG] get user embedding config failed: ${err?.message}`)
+    }
+  }
+  return {
+    apiUrl: getEmbeddingApiUrl(),
+    apiKey: getEmbeddingApiKey(),
+    model: getEmbeddingModel(),
+    enabled: isEmbeddingEnabled(),
+  }
+}
+
 // 计算向量 L2 范数，用于余弦相似度计算。
 function safeVectorNorm(vector = []) {
   if (!Array.isArray(vector) || vector.length === 0) return 0
@@ -149,11 +177,12 @@ function cosineSimilarity(queryVector = [], queryNorm = 0, chunkVector = [], chu
 }
 
 // 调用 Embedding 接口批量向量化文本。
-async function requestEmbeddings(textList = []) {
-  if (!isEmbeddingEnabled()) return []
-  const embeddingApiUrl = getEmbeddingApiUrl()
-  const embeddingApiKey = getEmbeddingApiKey()
-  const embeddingModel = getEmbeddingModel()
+async function requestEmbeddings(textList = [], username = '', fnGetUserCustomEmbeddingModels = null) {
+  const config = await getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels)
+  if (!config.enabled) return []
+  const embeddingApiUrl = config.apiUrl
+  const embeddingApiKey = config.apiKey
+  const embeddingModel = config.model
   const embeddingEncodingFormat = getEmbeddingEncodingFormat()
   const list = Array.isArray(textList) ? textList.filter((item) => String(item || '').trim()) : []
   if (list.length === 0) return []
@@ -188,8 +217,9 @@ async function requestEmbeddings(textList = []) {
 }
 
 // 对切块文本按批次生成 embedding 与范数元数据。
-async function buildChunkEmbeddings(chunks = []) {
-  if (!isEmbeddingEnabled()) {
+async function buildChunkEmbeddings(chunks = [], username = '', fnGetUserCustomEmbeddingModels = null) {
+  const config = await getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels)
+  if (!config.enabled) {
     return chunks.map(() => ({
       embedding: null,
       embeddingNorm: 0,
@@ -207,7 +237,7 @@ async function buildChunkEmbeddings(chunks = []) {
 
   for (let start = 0; start < chunks.length; start += embeddingBatchSize) {
     const slice = chunks.slice(start, start + embeddingBatchSize)
-    const vectors = await requestEmbeddings(slice)
+    const vectors = await requestEmbeddings(slice, username, fnGetUserCustomEmbeddingModels)
     for (let i = 0; i < vectors.length; i += 1) {
       const embedding = vectors[i]
       const norm = safeVectorNorm(embedding || [])
@@ -743,13 +773,15 @@ async function extractTextByFileType({ filePath, mimeType = '', ext = '' }) {
   return normalizeText(decodeBestEffort(buffer))
 }
 
-export function createRagService({ db, uploadsDir }) {
+export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels }) {
   // 创建 RAG 服务实例：绑定集合、队列与各业务能力函数。
   const docsCollection = db.collection('kb_docs')
   const chunksCollection = db.collection('kb_chunks')
   const runningIngestJobKeys = new Set()
   const queuedIngestJobKeys = new Set()
   const pendingIngestJobs = []
+  // 保存用户嵌入模型获取函数，供 retrieveContext 等闭包函数使用。
+  const fnGetUserCustomEmbeddingModels = getUserCustomEmbeddingModels || null
 
   async function findExistingDocByFileSha1({ username, kbId = DEFAULT_KB_ID, fileSha1 }) {
     const safeUsername = String(username || '').trim()
@@ -1039,7 +1071,7 @@ export function createRagService({ db, uploadsDir }) {
 
     if (chunks.length > 0) {
       try {
-        embeddingMetaList = await buildChunkEmbeddings(chunks)
+        embeddingMetaList = await buildChunkEmbeddings(chunks, safeUsername, fnGetUserCustomEmbeddingModels)
       } catch (error) {
         // 向量化失败不阻断入库，回退到关键词检索链路。
         embeddingError = error?.message || '向量化失败'
@@ -1330,17 +1362,20 @@ export function createRagService({ db, uploadsDir }) {
     let queryVector = []
     let queryVectorNorm = 0
 
-    if (useSemanticRetrieval && isEmbeddingEnabled()) {
-      try {
-        const vectors = await requestEmbeddings([safeQuery])
-        queryVector = Array.isArray(vectors?.[0]) ? vectors[0] : []
-        queryVectorNorm = safeVectorNorm(queryVector)
-      } catch (error) {
-        // 查询向量化失败时记录原因，便于排查 key/model/endpoint 配置问题。
-        const reason = String(error?.message || 'unknown error')
-        console.warn(`[RAG] query embedding failed, fallback to non-vector path: ${reason}`)
-        queryVector = []
-        queryVectorNorm = 0
+    if (useSemanticRetrieval) {
+      const embConfig = await getEmbeddingConfigForUser(safeUsername, fnGetUserCustomEmbeddingModels)
+      if (embConfig.enabled) {
+        try {
+          const vectors = await requestEmbeddings([safeQuery], safeUsername, fnGetUserCustomEmbeddingModels)
+          queryVector = Array.isArray(vectors?.[0]) ? vectors[0] : []
+          queryVectorNorm = safeVectorNorm(queryVector)
+        } catch (error) {
+          // 查询向量化失败时记录原因，便于排查 key/model/endpoint 配置问题。
+          const reason = String(error?.message || 'unknown error')
+          console.warn(`[RAG] query embedding failed, fallback to non-vector path: ${reason}`)
+          queryVector = []
+          queryVectorNorm = 0
+        }
       }
     }
 

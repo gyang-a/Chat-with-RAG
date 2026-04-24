@@ -91,6 +91,7 @@ function normalizeUserCustomModels(rawList = []) {
   for (const item of rawList) {
     const name = normalizeCustomModelName(item?.name)
     const apiKey = String(item?.apiKey || '').trim()
+    const endpoint = String(item?.endpoint || '').trim()
     if (!name || !apiKey) continue
     const uniqueKey = name.toLowerCase()
     if (seen.has(uniqueKey)) continue
@@ -99,6 +100,7 @@ function normalizeUserCustomModels(rawList = []) {
     list.push({
       name,
       apiKey,
+      endpoint,
       updatedAt: Number(item?.updatedAt || Date.now()),
       createdAt: Number(item?.createdAt || Date.now()),
     })
@@ -112,7 +114,7 @@ async function getUserCustomModels(username) {
   return normalizeUserCustomModels(user?.customModels || [])
 }
 
-async function upsertUserCustomModel({ username, name, apiKey }) {
+async function upsertUserCustomModel({ username, name, apiKey, endpoint }) {
   if (!usersCollection) {
     throw new Error('数据库未初始化')
   }
@@ -120,6 +122,7 @@ async function upsertUserCustomModel({ username, name, apiKey }) {
   const safeUsername = String(username || '').trim()
   const safeName = normalizeCustomModelName(name)
   const safeApiKey = String(apiKey || '').trim()
+  const safeEndpoint = String(endpoint || '').trim()
   if (!safeUsername || !safeName || !safeApiKey) {
     throw new Error('模型名称与 API Key 为必填')
   }
@@ -134,6 +137,7 @@ async function upsertUserCustomModel({ username, name, apiKey }) {
       ...next[existsIndex],
       name: safeName,
       apiKey: safeApiKey,
+      endpoint: safeEndpoint,
       updatedAt: now,
     }
   } else {
@@ -143,6 +147,7 @@ async function upsertUserCustomModel({ username, name, apiKey }) {
     next.push({
       name: safeName,
       apiKey: safeApiKey,
+      endpoint: safeEndpoint,
       createdAt: now,
       updatedAt: now,
     })
@@ -187,6 +192,129 @@ async function deleteUserCustomModel({ username, modelName }) {
   )
 }
 
+// ========== 自定义嵌入模型（Embedding Model）CRUD ==========
+
+function normalizeUserCustomEmbeddingModels(rawList = []) {
+  if (!Array.isArray(rawList)) return []
+
+  const seen = new Set()
+  const list = []
+  for (const item of rawList) {
+    const name = String(item?.name || '').trim()
+    const apiKey = String(item?.apiKey || '').trim()
+    const endpoint = String(item?.endpoint || '').trim()
+    if (!name || !apiKey || !endpoint) continue
+    const uniqueKey = name.toLowerCase()
+    if (seen.has(uniqueKey)) continue
+    seen.add(uniqueKey)
+
+    list.push({
+      name,
+      apiKey,
+      endpoint,
+      isDefault: Boolean(item?.isDefault),
+      updatedAt: Number(item?.updatedAt || Date.now()),
+      createdAt: Number(item?.createdAt || Date.now()),
+    })
+  }
+
+  return list
+}
+
+async function getUserCustomEmbeddingModels(username) {
+  const user = await getAuthUser(username)
+  return normalizeUserCustomEmbeddingModels(user?.customEmbeddingModels || [])
+}
+
+async function upsertUserCustomEmbeddingModel({ username, name, apiKey, endpoint, isDefault = false }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = String(name || '').trim()
+  const safeApiKey = String(apiKey || '').trim()
+  const safeEndpoint = String(endpoint || '').trim()
+  if (!safeUsername || !safeName || !safeApiKey || !safeEndpoint) {
+    throw new Error('模型名称、接口地址和 API Key 均为必填')
+  }
+
+  const current = await getUserCustomEmbeddingModels(safeUsername)
+  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
+  const next = [...current]
+  const now = Date.now()
+
+  // 如果设为默认，先清除其他默认标记
+  if (isDefault) {
+    for (const item of next) {
+      item.isDefault = false
+    }
+  }
+
+  if (existsIndex >= 0) {
+    next[existsIndex] = {
+      ...next[existsIndex],
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      isDefault,
+      updatedAt: now,
+    }
+  } else {
+    if (next.length >= 10) {
+      throw new Error('自定义嵌入模型数量已达上限（10）')
+    }
+    // 如果是第一个模型，自动设为默认
+    const autoDefault = next.length === 0 ? true : isDefault
+    next.push({
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      isDefault: autoDefault,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customEmbeddingModels: next,
+      },
+    },
+  )
+
+  return {
+    name: safeName,
+    updated: existsIndex >= 0,
+  }
+}
+
+async function deleteUserCustomEmbeddingModel({ username, modelName }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = String(modelName || '').trim()
+  if (!safeUsername || !safeName) {
+    throw new Error('模型名称不能为空')
+  }
+
+  const current = await getUserCustomEmbeddingModels(safeUsername)
+  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customEmbeddingModels: next,
+      },
+    },
+  )
+}
+
 async function getAvailableModelsForUser(username) {
   const customModels = await getUserCustomModels(username)
   const names = [...modelRegistry.allModels]
@@ -218,14 +346,13 @@ async function resolveSelectionForUser(username, inputModel) {
   const customModels = await getUserCustomModels(username)
   const hit = customModels.find((item) => item.name.toLowerCase() === requestedModel.toLowerCase())
   if (hit) {
-    const endpoint = getCustomModelEndpoint()
     return {
       provider: {
         id: `user-model:${requestedModel}`,
         mode: 'openai',
-        endpoint,
+        endpoint: toOpenAICompatEndpoint(hit.endpoint),
         apiKey: hit.apiKey,
-        authMode: 'auto',
+        authMode: 'bearer',
         requestModel: hit.name,
         defaultModel: hit.name,
         models: [hit.name],
@@ -288,6 +415,16 @@ async function initMongoDB() {
     },
   )
 
+  // 补齐历史用户缺失的自定义嵌入模型字段。
+  await users.updateMany(
+    {
+      $or: [{ customEmbeddingModels: { $exists: false } }, { customEmbeddingModels: null }],
+    },
+    {
+      $set: { customEmbeddingModels: [] },
+    },
+  )
+
   const usersWithCreatedAt = await users.find({ createdAt: { $exists: true } }).project({ _id: 1, createdAt: 1 }).toArray()
   const bulkTimeFix = usersWithCreatedAt
     .map((item) => {
@@ -318,7 +455,7 @@ async function initMongoDB() {
   usersCollection = users
   conversationsCollection = conversations
   messagesCollection = messages
-  ragService = createRagService({ db, uploadsDir })
+  ragService = createRagService({ db, uploadsDir, getUserCustomEmbeddingModels })
   await ragService.ensureIndexes()
   mongodbClient = client
 }
@@ -1524,9 +1661,10 @@ app.post('/api/models/custom', requireAuth, async (req, res) => {
   const username = String(req.auth?.username || '').trim()
   const modelName = String(req.body?.modelName || '').trim()
   const apiKey = String(req.body?.apiKey || '').trim()
+  const endpoint = String(req.body?.endpoint || '').trim()
 
-  if (!modelName || !apiKey) {
-    res.status(400).json({ message: '模型名称和 API Key 为必填' })
+  if (!modelName || !apiKey || !endpoint) {
+    res.status(400).json({ message: '接口地址、模型名称和 API Key 均为必填' })
     return
   }
 
@@ -1545,6 +1683,7 @@ app.post('/api/models/custom', requireAuth, async (req, res) => {
     username,
     name: normalizedName,
     apiKey,
+    endpoint,
   })
 
   res.json({ ok: true, model: result })
@@ -1559,6 +1698,107 @@ app.delete('/api/models/custom/:modelName', requireAuth, async (req, res) => {
   }
 
   await deleteUserCustomModel({ username, modelName })
+  res.json({ ok: true })
+})
+
+// ========== 嵌入模型 API ==========
+
+// 获取当前有效的嵌入模型配置（用户自定义优先，否则返回全局配置）
+app.get('/api/embedding-config', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const userModels = await getUserCustomEmbeddingModels(username)
+  if (userModels && userModels.length > 0) {
+    // 优先使用默认模型
+    const defaultModel = userModels.find((m) => m.isDefault)
+    const m = defaultModel || userModels[0]
+    res.json({
+      ok: true,
+      configured: true,
+      endpoint: m.endpoint,
+      model: m.name,
+      source: 'custom',
+    })
+    return
+  }
+  // 回退到全局环境变量
+  const globalEndpoint = String(process.env.EMBEDDING_API_URL || '').trim()
+  const globalModel = String(process.env.EMBEDDING_MODEL || '').trim()
+  res.json({
+    ok: true,
+    configured: Boolean(globalEndpoint && globalModel),
+    endpoint: globalEndpoint,
+    model: globalModel,
+    source: 'global',
+  })
+})
+
+app.get('/api/models/embedding', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const result = await getUserCustomEmbeddingModels(username)
+  res.json({
+    ok: true,
+    models: result,
+  })
+})
+
+app.post('/api/models/embedding', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const modelName = String(req.body?.modelName || '').trim()
+  const apiKey = String(req.body?.apiKey || '').trim()
+  const endpoint = String(req.body?.endpoint || '').trim()
+
+  if (!modelName || !apiKey || !endpoint) {
+    res.status(400).json({ message: '接口地址、模型名称和 API Key 均为必填' })
+    return
+  }
+
+  const result = await upsertUserCustomEmbeddingModel({
+    username,
+    name: modelName,
+    apiKey,
+    endpoint,
+  })
+
+  res.json({ ok: true, model: result })
+})
+
+app.delete('/api/models/embedding/:modelName', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const modelName = String(req.params?.modelName || '').trim()
+  if (!modelName) {
+    res.status(400).json({ message: '缺少模型名称' })
+    return
+  }
+
+  await deleteUserCustomEmbeddingModel({ username, modelName })
+  res.json({ ok: true })
+})
+
+// 设置默认嵌入模型
+app.put('/api/models/embedding/:modelName/default', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const modelName = String(req.params?.modelName || '').trim()
+  if (!modelName) {
+    res.status(400).json({ message: '缺少模型名称' })
+    return
+  }
+
+  const current = await getUserCustomEmbeddingModels(username)
+  const model = current.find((item) => item.name.toLowerCase() === modelName.toLowerCase())
+  if (!model) {
+    res.status(404).json({ message: '嵌入模型不存在' })
+    return
+  }
+
+  // 更新为默认
+  await upsertUserCustomEmbeddingModel({
+    username,
+    name: model.name,
+    apiKey: model.apiKey,
+    endpoint: model.endpoint,
+    isDefault: true,
+  })
+
   res.json({ ok: true })
 })
 

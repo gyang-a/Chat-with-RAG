@@ -6,6 +6,7 @@ import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { MessageActions } from '@/components/chat/MessageActions'
 import { LoadingDots } from '@/components/chat/LoadingDots'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
 
 function normalizeDisplayText(value) {
   if (value == null) return ''
@@ -32,6 +33,9 @@ function retrievalModeLabel(mode = '') {
 export function MessageBubble({ message, onRegenerate, streaming = false }) {
   const isUser = message.role === 'user'
   const retrievalLabel = retrievalModeLabel(String(message?.retrievalModeUsed || ''))
+  const avatarUrl = useAuthStore((s) => s.avatarUrl)
+  const username = useAuthStore((s) => s.username)
+  const displayLabel = String(username || 'U').slice(0, 1).toUpperCase()
   const streamingMinHeight =
     streaming && Number.isFinite(Number(message?.streamLayoutHeight))
       ? Math.max(46, Number(message.streamLayoutHeight))
@@ -41,20 +45,31 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
     const attachments = message.attachments || []
     return (
       <div className='animate-bubble-in mx-auto w-full max-w-[1050px] px-4 py-1.5 md:px-6'>
-        <div className='ml-auto w-fit max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-[4px] border border-border bg-muted px-4 py-3 text-sm text-foreground shadow-soft md:max-w-[72%]'>
-          {message.content}
-          {attachments.length > 0 && (
-            <div className='mt-2 space-y-1'>
-              {attachments.map((file, index) => (
-                <div
-                  key={`${file.fileId || file.name}_${index}`}
-                  className='rounded-md bg-background px-2 py-1 text-xs text-muted-foreground'
-                >
-                  附件: {file.name || '未命名文件'}
-                </div>
-              ))}
-            </div>
-          )}
+        <div className='flex w-full items-start gap-3'>
+          <div className='ml-auto' />
+          <div
+            className={cn(
+              'ml-auto w-fit max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-[4px] border border-border bg-muted px-4 py-3 text-sm text-foreground shadow-soft md:max-w-[72%]',
+            )}
+          >
+            {message.content}
+            {attachments.length > 0 && (
+              <div className='mt-2 space-y-1'>
+                {attachments.map((file, index) => (
+                  <div
+                    key={`${file.fileId || file.name}_${index}`}
+                    className='rounded-md bg-background px-2 py-1 text-xs text-muted-foreground'
+                  >
+                    附件: {file.name || '未命名文件'}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <Avatar className='mt-1 h-8 w-8 flex-shrink-0'>
+            <AvatarImage src={avatarUrl} alt='用户头像' />
+            <AvatarFallback className='text-xs'>{displayLabel}</AvatarFallback>
+          </Avatar>
         </div>
       </div>
     )
@@ -65,7 +80,7 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
       <div className='flex w-full items-start gap-3'>
         <Avatar className='mt-1 h-8 w-8 border border-border'>
           {/* 头像使用站点图标，确保 public 目录存在 favicon.png */}
-          <AvatarImage src='/favicon.png' alt='Kira AI' />
+          <AvatarImage src='/assistant.png' alt='Kira AI' />
           {/* 后备头像使用 Bot 图标，维持视觉一致性 */}
           <AvatarFallback className='bg-card text-primary'>
             <Bot className='h-4 w-4' />
