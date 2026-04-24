@@ -2,7 +2,9 @@ import tailwindcssAnimate from 'tailwindcss-animate'
 
 /** @type {import('tailwindcss').Config} */
 export default {
+  //开启暗黑模式
   darkMode: ['class'],
+  //指定需要扫描的文件路径，以便 Tailwind CSS 可以生成相应的样式
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
@@ -11,6 +13,7 @@ export default {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      //定义自定义颜色，使用 CSS 变量以便于主题切换和维护
       colors: {
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
@@ -29,6 +32,7 @@ export default {
         ai: 'hsl(var(--ai))',
         user: 'hsl(var(--user))',
       },
+      //定义自定义动画
       keyframes: {
         'accordion-down': {
           from: { height: '0' },
@@ -58,6 +62,7 @@ export default {
       },
     },
   },
+  //引入 tailwindcss-animate 插件以启用预定义的动画类
   plugins: [tailwindcssAnimate],
 }
 

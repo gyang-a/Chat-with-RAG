@@ -20,10 +20,13 @@ export async function streamChat({
   attachments = [],// 附件列表
   recentMessages = [],// 最近消息历史（用于上下文）
   retrievalMode = 'hybrid',
+  ragTopK,
   signal,//AbortSignal，用于取消请求
   onEvent,// 收到 SSE 事件时的回调
   onError, // 错误回调
 }) {
+  const safeTopK = Math.min(20, Math.max(1, Number(ragTopK) || 4))
+
   // 向后端发起流式聊天请求，逐段回调 onEvent 给上层拼接内容。
   const token = useAuthStore.getState().token
   const response = await fetch(API_CHAT_URL, {
@@ -39,6 +42,7 @@ export async function streamChat({
       attachments,
       recentMessages,
       retrievalMode,
+      ragTopK: safeTopK,
     }),
     signal,
   })

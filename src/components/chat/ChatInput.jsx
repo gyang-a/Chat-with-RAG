@@ -1,10 +1,11 @@
 // 模块说明：聊天输入区组件，负责文本输入、附件选择上传与发送控制。
 import { useMemo, useRef, useState } from 'react'
-import { Eraser, Paperclip, Plus, SendHorizonal, Square, Trash2, RotateCcw } from 'lucide-react'
+import { Eraser, Globe, Paperclip, RotateCcw, SendHorizonal, Sparkles, Square, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { uploadDocument } from '@/services/uploadApi'
 import { useChatStore } from '@/stores/chatStore'
+import { useUIStore } from '@/stores/uiStore'
 import { createId } from '@/lib/utils'
 
 const ALLOWED_TYPES = ['application/pdf', 'text/plain', 'text/markdown']
@@ -36,14 +37,13 @@ function isAllowedChatFile(file) {
 export function ChatInput({
   onSend,
   onStop,
-  availableModels = [],
   selectedModel = '',
-  onSelectModel,
-  modelsLoading = false,
 }) {
   const [text, setText] = useState('')
   const [pendingFiles, setPendingFiles] = useState([])
   const generating = useChatStore((s) => s.generating)
+  const rightPanelOpen = useUIStore((s) => s.rightPanelOpen)
+  const toggleRightPanel = useUIStore((s) => s.toggleRightPanel)
   const inputRef = useRef(null)
   const fileInputRef = useRef(null)
   const canSend = useMemo(() => text.trim().length > 0 || pendingFiles.length > 0, [text, pendingFiles.length])
@@ -269,11 +269,11 @@ export function ChatInput({
   }
 
   return (
-    <footer className='border-t border-border bg-background/98 px-3 pb-3 pt-2 backdrop-blur md:px-5'>
-      <div className='mx-auto w-full max-w-[980px]'>
-        <div className='rounded-2xl border border-border bg-card p-2 shadow-soft'>
+    <footer className='border-t border-border/80 bg-background/95 px-3 pb-3 pt-3 backdrop-blur md:px-5'>
+      <div className='mx-auto w-full max-w-[1050px]'>
+        <div className='rounded-[20px] border border-border bg-card/95 p-2.5 shadow-soft'>
           {pendingFiles.length > 0 && (
-            <div className='mb-2 flex flex-wrap gap-2 rounded-lg border border-border/70 bg-muted/40 p-2'>
+            <div className='mb-2 flex flex-wrap gap-2 rounded-xl border border-border/70 bg-muted/40 p-2'>
               {pendingFiles.map((item) => (
                 <div key={item.id} className='group flex max-w-full items-center gap-2 rounded-md bg-card px-2 py-1 text-xs'>
                   <span className='truncate text-foreground'>{item.file.name}</span>
@@ -310,77 +310,6 @@ export function ChatInput({
             </div>
           )}
 
-          <div className='mb-2 flex items-center justify-between'>
-            <div className='flex items-center gap-1'>
-              <input
-                ref={fileInputRef}
-                className='hidden'
-                type='file'
-                multiple
-                accept='.pdf,.txt,.md,text/markdown'
-                onChange={handleSelectFile}
-              />
-              <Button
-                type='button'
-                size='icon'
-                variant='ghost'
-                className='h-8 w-8 cursor-pointer'
-                title='上传文件'
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <span>
-                  <Paperclip className='h-4 w-4' />
-                </span>
-              </Button>
-              <Button
-                size='icon'
-                variant='ghost'
-                className='h-8 w-8'
-                title='清空输入与附件'
-                onClick={() => {
-                  setText('')
-                  setPendingFiles([])
-                }}
-              >
-                <Eraser className='h-4 w-4' />
-              </Button>
-              <Button size='icon' variant='ghost' className='h-8 w-8' title='更多功能（敬请期待）'>
-                <Plus className='h-4 w-4' />
-              </Button>
-
-              <label className='ml-1 flex items-center gap-2 rounded-lg border border-border bg-background px-2 py-1 text-xs text-muted-foreground'>
-                <span className='whitespace-nowrap'>模型</span>
-                <select
-                  value={selectedModel}
-                  onChange={(event) => onSelectModel?.(event.target.value)}
-                  disabled={modelsLoading || availableModels.length === 0}
-                  className='max-w-[160px] bg-transparent text-foreground outline-none disabled:opacity-60'
-                  title={selectedModel || '选择模型'}
-                >
-                  {availableModels.length === 0 ? (
-                    <option value=''>{modelsLoading ? '加载中...' : '无可用模型'}</option>
-                  ) : (
-                    availableModels.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </label>
-            </div>
-
-            {generating ? (
-              <Button size='sm' variant='outline' onClick={onStop}>
-                <Square className='mr-1 h-3.5 w-3.5 fill-current' />停止生成
-              </Button>
-            ) : (
-              <Button size='sm' variant='ghost' className='text-xs text-muted-foreground'>
-                回车发送，Shift+回车换行
-              </Button>
-            )}
-          </div>
-
           <div className='flex items-end gap-2'>
             <textarea
               ref={inputRef}
@@ -391,12 +320,12 @@ export function ChatInput({
               }}
               onKeyDown={onKeyDown}
               rows={1}
-              placeholder='给Kira发送消息...'
-              className='max-h-[180px] min-h-[42px] flex-1 resize-none border-0 bg-transparent px-1.5 py-2 text-sm outline-none placeholder:text-muted-foreground'
+              placeholder='输入消息，Enter 发送，Shift + Enter 换行'
+              className='max-h-[180px] min-h-[74px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm leading-6 outline-none placeholder:text-muted-foreground'
             />
 
             <Button
-              className='h-10 w-10 rounded-xl'
+              className='mb-1 h-10 w-10 rounded-xl bg-[linear-gradient(135deg,#6578ff,#5b5df2)] text-white shadow-[0_10px_24px_rgba(84,95,234,0.28)] hover:brightness-105'
               size='icon'
               disabled={!canSend || generating}
               onClick={handleSend}
@@ -405,6 +334,67 @@ export function ChatInput({
             >
               <SendHorizonal className='h-4 w-4' />
             </Button>
+          </div>
+
+          <div className='mt-1.5 flex items-center justify-between gap-2'>
+            <div className='flex flex-wrap items-center gap-1.5'>
+              <input
+                ref={fileInputRef}
+                className='hidden'
+                type='file'
+                multiple
+                accept='.pdf,.txt,.md,text/markdown'
+                onChange={handleSelectFile}
+              />
+
+              <Button
+                type='button'
+                size='sm'
+                variant='ghost'
+                className='h-8 rounded-lg px-2 text-xs text-muted-foreground'
+                title='上传文件'
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className='mr-1.5 h-3.5 w-3.5' />附件
+              </Button>
+
+              <Button size='sm' variant='ghost' className='h-8 rounded-lg px-2 text-xs text-muted-foreground' title='联网搜索（敬请期待）'>
+                <Globe className='mr-1.5 h-3.5 w-3.5' />联网搜索
+              </Button>
+
+              <Button
+                size='sm'
+                variant='ghost'
+                className='h-8 rounded-lg px-2 text-xs text-primary hover:bg-primary/10'
+                // 与顶部按钮保持一致：可打开也可关闭 RAG 面板。
+                onClick={toggleRightPanel}
+                title={rightPanelOpen ? '关闭RAG面板' : '打开RAG面板'}
+              >
+                <Sparkles className='mr-1.5 h-3.5 w-3.5' />
+                {rightPanelOpen ? '关闭 RAG' : '开启 RAG'}
+              </Button>
+
+              <Button
+                size='sm'
+                variant='ghost'
+                className='h-8 rounded-lg px-2 text-xs text-muted-foreground'
+                title='清空输入与附件'
+                onClick={() => {
+                  setText('')
+                  setPendingFiles([])
+                }}
+              >
+                <Eraser className='mr-1.5 h-3.5 w-3.5' />清空
+              </Button>
+            </div>
+
+            {generating ? (
+              <Button size='sm' variant='outline' className='h-8 rounded-lg px-2 text-xs' onClick={onStop}>
+                <Square className='mr-1 h-3.5 w-3.5 fill-current' />停止生成
+              </Button>
+            ) : (
+              <span className='pr-1 text-xs text-muted-foreground'>当前模型: {selectedModel || '未选择'}</span>
+            )}
           </div>
         </div>
 

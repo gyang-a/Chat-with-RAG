@@ -20,7 +20,7 @@ export function MessageList({
 
   return (
     <Virtuoso
-      className='h-full'
+      className='h-full py-2'
       data={messages}
       atBottomStateChange={onAtBottomStateChange}
       followOutput={autoScrollEnabled ? (generating ? 'auto' : 'smooth') : false}

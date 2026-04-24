@@ -1,24 +1,21 @@
 :root {
-  --background: 220 20% 98%;
-  --foreground: 222 35% 13%;
+  --background: 225 40% 97%;
+  --foreground: 224 27% 17%;
   --card: 0 0% 100%;
-  --card-foreground: 222 35% 13%;
-  --muted: 216 30% 95%;
-  --muted-foreground: 220 11% 45%;
-  --border: 220 20% 90%;
-  --primary: 217 92% 58%;
+  --card-foreground: 224 27% 17%;
+  --muted: 225 32% 94%;
+  --muted-foreground: 224 12% 45%;
+  --border: 224 27% 89%;
+  --primary: 232 88% 66%;
   --primary-foreground: 0 0% 100%;
-  --accent: 216 32% 94%;
-  --accent-foreground: 222 35% 13%;
-  --sidebar: 220 30% 97%;
-  --sidebar-foreground: 222 32% 18%;
-  --sidebar-border: 220 22% 88%;
-  --user: 217 95% 58%;
-  /* --ai: 216 24% 95%; */
-  /* --ai: 216 80% 98%; */
-  /* --ai: 0 0% 99%; */ 
-  --ai: 216 100% 90%;
-  --shadow: 220 18% 40%;
+  --accent: 224 34% 93%;
+  --accent-foreground: 224 27% 17%;
+  --sidebar: 228 34% 96%;
+  --sidebar-foreground: 224 24% 20%;
+  --sidebar-border: 224 31% 88%;
+  --user: 225 34% 92%;
+  --ai: 0 0% 100%;
+  --shadow: 222 30% 31%;
   --radius: 12px;
 }
 
@@ -30,7 +27,7 @@
   --muted: 223 14% 18%;
   --muted-foreground: 216 16% 72%;
   --border: 220 14% 22%;
-  --primary: 216 90% 61%;
+  --primary: 230 92% 66%;
   --primary-foreground: 0 0% 100%;
   --accent: 223 16% 18%;
   --accent-foreground: 210 25% 94%;

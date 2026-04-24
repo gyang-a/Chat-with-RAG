@@ -40,15 +40,15 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
   if (isUser) {
     const attachments = message.attachments || []
     return (
-      <div className='animate-bubble-in mx-auto w-full max-w-[980px] px-4 py-1.5 md:px-6'>
-        <div className='ml-auto w-fit max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-[2px] bg-user px-4 py-3 text-sm text-primary-foreground shadow-soft md:max-w-[72%]'>
+      <div className='animate-bubble-in mx-auto w-full max-w-[1050px] px-4 py-1.5 md:px-6'>
+        <div className='ml-auto w-fit max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-[4px] border border-border bg-muted px-4 py-3 text-sm text-foreground shadow-soft md:max-w-[72%]'>
           {message.content}
           {attachments.length > 0 && (
             <div className='mt-2 space-y-1'>
               {attachments.map((file, index) => (
                 <div
                   key={`${file.fileId || file.name}_${index}`}
-                  className='rounded-md bg-white/14 px-2 py-1 text-xs text-primary-foreground/95'
+                  className='rounded-md bg-background px-2 py-1 text-xs text-muted-foreground'
                 >
                   附件: {file.name || '未命名文件'}
                 </div>
@@ -61,7 +61,7 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
   }
 
   return (
-    <div className='group animate-bubble-in mx-auto w-full max-w-[980px] px-4 py-1.5 md:px-6'>
+    <div className='group animate-bubble-in mx-auto w-full max-w-[1050px] px-4 py-1.5 md:px-6'>
       <div className='flex w-full items-start gap-3'>
         <Avatar className='mt-1 h-8 w-8 border border-border'>
           {/* 头像使用站点图标，确保 public 目录存在 favicon.png */}
@@ -73,7 +73,7 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
         </Avatar>
         <div
           className={cn(
-            'w-fit min-w-0 max-w-[88%] rounded-2xl rounded-bl-[2px] border border-border bg-ai px-4 py-3 text-base text-foreground shadow-soft md:max-w-[76%]',
+            'w-fit min-w-0 max-w-[88%] rounded-2xl rounded-bl-[4px] border border-border bg-card px-4 py-3 text-base text-foreground shadow-soft md:max-w-[76%]',
           )}
           style={streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined}
         >

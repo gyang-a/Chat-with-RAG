@@ -35,12 +35,12 @@ function toOpenAICompatEndpoint(url = '') {
 // value.mode 可选：openai | deepseek | sse_json，默认 openai
 // value.authMode 可选：auto | bearer | zhipu-jwt，默认 auto（sse_json 默认 bearer）
 export const MODEL_CATALOG = {
-  'GLM-5.1': {
-    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+  'MiniMax-M2.7': {
+    endpoint: 'https://api.minimaxi.com/v1',
     apiKey: '',
-    model: 'glm-5.1',
+    model: 'MiniMax-M2.7',
     mode: 'openai',
-    authMode: 'zhipu-jwt',
+    authMode: 'auto',
   },
   'GLM-4.7-Flash': {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
@@ -55,14 +55,7 @@ export const MODEL_CATALOG = {
     model: 'deepseek-chat',
     mode: 'deepseek',
     authMode: 'bearer',
-  },
-  'DeepSeek-Reasoner': {
-    endpoint: 'https://api.deepseek.com/chat/completions',
-    apiKey: '',
-    model: 'deepseek-reasoner',
-    mode: 'deepseek',
-    authMode: 'bearer',
-  },
+  }
 }
 
 export const DEFAULT_MODEL = 'GLM-5.1'

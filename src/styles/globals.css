@@ -11,10 +11,10 @@ body,
 
 body {
   margin: 0;
-  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: 'MiSans', 'Source Han Sans SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background:
-    radial-gradient(1200px 600px at 0% -20%, hsl(var(--primary) / 0.08), transparent),
-    radial-gradient(1000px 500px at 100% -10%, hsl(188 90% 55% / 0.08), transparent),
+    radial-gradient(1200px 720px at -12% -22%, hsl(var(--primary) / 0.12), transparent),
+    radial-gradient(900px 540px at 118% -15%, hsl(196 89% 66% / 0.11), transparent),
     hsl(var(--background));
   color: hsl(var(--foreground));
   transition: background-color 0.28s ease, color 0.28s ease;
@@ -38,7 +38,7 @@ select option {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: hsl(var(--border) / 0.95);
   border-radius: 10px;
 }
 

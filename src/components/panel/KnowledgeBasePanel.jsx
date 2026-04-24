@@ -20,7 +20,6 @@ import {
   reindexKbDocument,
   uploadKbDocument,
 } from '@/services/kbApi'
-import { useUIStore } from '@/stores/uiStore'
 
 const ALLOWED_TYPES = [
   'application/pdf',
@@ -51,9 +50,7 @@ function statusLabel(parseStatus) {
   return '待处理'
 }
 
-export function KnowledgeBasePanel() {
-  const retrievalMode = useUIStore((s) => s.retrievalMode)
-  const setRetrievalMode = useUIStore((s) => s.setRetrievalMode)
+export function KnowledgeBasePanel({ compact = false }) {
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -304,7 +301,7 @@ export function KnowledgeBasePanel() {
   }
 
   return (
-    <section className='mt-4'>
+    <section className={compact ? '' : 'mt-4'}>
       <div className='mb-2 flex items-center justify-between'>
         <h3 className='text-sm font-semibold'>知识库管理</h3>
         <Button
@@ -360,23 +357,6 @@ export function KnowledgeBasePanel() {
           className='hidden'
           onChange={handleSelectUpload}
         />
-      </div>
-
-      <div className='mb-2 flex items-center gap-2'>
-        <label className='flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1 text-xs text-muted-foreground'>
-          <span className='whitespace-nowrap'>检索模式</span>
-          <select
-            value={retrievalMode}
-            onChange={(event) => setRetrievalMode(event.target.value)}
-            className='bg-transparent text-foreground outline-none'
-            title='选择检索模式'
-          >
-            <option value='direct'>模型直答</option>
-            <option value='hybrid'>混合</option>
-            <option value='text'>文本</option>
-            <option value='semantic'>语义</option>
-          </select>
-        </label>
       </div>
 
       <div className='mb-2 space-y-2'>

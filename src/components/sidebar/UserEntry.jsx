@@ -84,8 +84,8 @@ export function UserEntry({ collapsed }) {
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className='flex w-full items-center gap-2 rounded-xl px-2 py-2 transition hover:bg-card'>
-              <Avatar className='h-8 w-8'>
+            <button className='flex w-full items-center gap-2 rounded-2xl border border-sidebar-border bg-card px-2 py-2 transition hover:border-primary/30'>
+              <Avatar className='h-9 w-9'>
                 {/* 有头像时优先显示图片，加载失败时自动回退到首字母 */}
                 <AvatarImage src={resolvedAvatarUrl} alt={`${displayName}头像`} />
                 <AvatarFallback>{avatarLabel}</AvatarFallback>
@@ -96,6 +96,9 @@ export function UserEntry({ collapsed }) {
                     <p className='truncate text-sm font-medium'>{displayName}</p>
                     <p className='truncate text-xs text-muted-foreground'>个人账号</p>
                   </div>
+                  <span className='rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary'>
+                    Pro
+                  </span>
                   <ChevronDown className='h-4 w-4 text-muted-foreground' />
                 </>
               )}

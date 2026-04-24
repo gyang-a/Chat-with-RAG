@@ -86,6 +86,8 @@ export function useSSEChat() {
   const setStreamError = useChatStore((s) => s.setStreamError)
   // 检索模式（文本 / 语义 / 混合）
   const retrievalMode = useUIStore((s) => s.retrievalMode)
+  const ragEnabled = useUIStore((s) => s.ragEnabled)
+  const ragTopK = useUIStore((s) => s.ragTopK)
 
   /**
    * 停止AI流式生成
@@ -109,6 +111,10 @@ export function useSSEChat() {
       const rawText = typeof payload === 'string' ? payload : payload?.text || ''
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : []
       const model = typeof payload === 'object' ? String(payload?.model || '').trim() : ''
+      // 关闭 RAG 后统一降级为模型直答。
+      const effectiveRetrievalMode = ragEnabled ? retrievalMode : 'direct'
+      // Top K 从 UI 状态读取并在发送前做一次兜底校验。
+      const safeRagTopK = Math.min(20, Math.max(1, Number(ragTopK) || 4))
       // 过滤用户输入（安全处理）
       const text = sanitizeUserInput(rawText)
       // 最终发送的文本（无文字但有附件时，默认提示语）
@@ -206,7 +212,8 @@ export function useSSEChat() {
           model,
           attachments,
           recentMessages,
-          retrievalMode,
+          retrievalMode: effectiveRetrievalMode,
+          ragTopK: safeRagTopK,
           signal: controller.signal, // 绑定中断信号
           // 接收后端推送的事件
           onEvent: (event) => {
@@ -302,6 +309,8 @@ export function useSSEChat() {
       setGenerating,
       setStreamError,
       startAssistantMessage,
+      ragEnabled,
+      ragTopK,
       retrievalMode,
     ],
   )

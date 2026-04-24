@@ -39,8 +39,8 @@ export function ConversationList({ conversations, collapsed, mobile }) {
   }
 
   return (
-    <div className='min-h-0 flex-1 overflow-y-auto p-2'>
-      <ul className='space-y-1'>
+    <div className='min-h-0 flex-1 overflow-y-auto px-3 pb-2'>
+      <ul className='space-y-1.5'>
         {conversations.map((item) => {
           const active = item.id === currentConversationId
           return (
@@ -49,10 +49,10 @@ export function ConversationList({ conversations, collapsed, mobile }) {
                 role='button'
                 tabIndex={0}
                 className={cn(
-                  'group w-full rounded-xl border px-3 py-2 text-left transition duration-200',
+                  'group w-full rounded-xl px-3 py-2 text-left transition duration-200',
                   active
-                    ? 'border-primary/40 bg-primary/10 text-foreground'
-                    : 'border-transparent hover:border-sidebar-border hover:bg-card',
+                    ? 'bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_rgba(99,122,255,0.18)]'
+                    : 'text-sidebar-foreground/88 hover:bg-card',
                 )}
                 onClick={() => {
                   setCurrentConversation(item.id)
@@ -83,9 +83,14 @@ export function ConversationList({ conversations, collapsed, mobile }) {
                           className='w-full rounded bg-background px-1.5 py-1 text-sm outline-none'
                         />
                       ) : (
-                        <p className='truncate text-sm font-medium'>{item.pinned ? '📌 ' : ''}{truncateText(item.title, 24)}</p>
+                        <p className='truncate text-sm font-medium'>
+                          {item.pinned ? '置顶 · ' : ''}
+                          {truncateText(item.title, 24)}
+                        </p>
                       )}
-                      <p className='mt-0.5 truncate text-xs text-muted-foreground'>{truncateText(item.lastPreview || '暂无消息', 34)}</p>
+                      <p className='mt-0.5 truncate text-xs text-muted-foreground'>
+                        {truncateText(item.lastPreview || '暂无消息', 34)}
+                      </p>
                     </div>
 
                     <DropdownMenu>
@@ -93,7 +98,7 @@ export function ConversationList({ conversations, collapsed, mobile }) {
                         <Button
                           size='icon'
                           variant='ghost'
-                          className='h-7 w-7 opacity-0 transition group-hover:opacity-100'
+                          className='h-7 w-7 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100'
                           onClick={(e) => {
                             e.stopPropagation()
                           }}

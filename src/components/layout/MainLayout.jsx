@@ -174,14 +174,20 @@ export function MainLayout() {
       }
     }
 
+    const onModelsUpdated = () => {
+      refreshModels()
+    }
+
     refreshModels()
     window.addEventListener('focus', refreshModels)
     document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('kria:models-updated', onModelsUpdated)
 
     return () => {
       cancelled = true
       window.removeEventListener('focus', refreshModels)
       document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('kria:models-updated', onModelsUpdated)
     }
   }, [ownerUsername, token])
 
@@ -209,41 +215,50 @@ export function MainLayout() {
   }, [])
 
   return (
-    <div className='flex h-screen w-full overflow-hidden bg-background text-foreground'>
-      <div className='hidden md:block'>
-        <Sidebar />
-      </div>
+    <div className='h-screen w-full bg-[radial-gradient(1400px_700px_at_-15%_-25%,rgba(91,123,255,0.18),transparent),radial-gradient(1100px_580px_at_115%_-10%,rgba(78,195,255,0.16),transparent),#f4f6fb] p-2 text-foreground md:p-3'>
+      <div className='flex h-full w-full overflow-hidden rounded-[24px] border border-[#dce2f1] bg-card/85 shadow-[0_12px_45px_rgba(26,41,82,0.08)] backdrop-blur'>
+        <div className='hidden md:block'>
+          <Sidebar />
+        </div>
 
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent title='会话侧边栏' overlayClassName='md:hidden' className='w-[300px] p-0 md:hidden'>
-          <Sidebar mobile />
-        </SheetContent>
-      </Sheet>
-
-      {isMobileRightPanelViewport && (
-        <Sheet open={rightPanelOpen} onOpenChange={setRightPanelOpen}>
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
           <SheetContent
-            title='RAG 辅助面板'
-            overlayClassName='xl:hidden'
-            className='left-auto right-0 w-[92vw] max-w-[360px] border-r-0 border-l border-border bg-background p-0 text-foreground xl:hidden'
+            title='会话侧边栏'
+            overlayClassName='md:hidden'
+            className='w-[300px] border-r border-sidebar-border bg-sidebar p-0 md:hidden'
           >
-            <AuxPanel mobile />
+            <Sidebar mobile />
           </SheetContent>
         </Sheet>
-      )}
 
-      <ChatWindow
-        autoScrollEnabled={autoScrollEnabled}
-        onAtBottomStateChange={onAtBottomStateChange}
-        onSend={sendMessage}
-        onStop={stopGenerating}
-        onRegenerate={regenerateLast}
-        availableModels={availableModels}
-        selectedModel={selectedModel}
-        onSelectModel={setSelectedModel}
-      />
+        {isMobileRightPanelViewport && (
+          <Sheet open={rightPanelOpen} onOpenChange={setRightPanelOpen}>
+            <SheetContent
+              title='RAG 辅助面板'
+              overlayClassName='xl:hidden'
+              className='left-auto right-0 w-[94vw] max-w-[360px] border-r-0 border-l border-border bg-background p-0 text-foreground xl:hidden'
+            >
+              <AuxPanel mobile />
+            </SheetContent>
+          </Sheet>
+        )}
 
-      <AuxPanel />
+        <div className='flex min-w-0 flex-1'>
+          <ChatWindow
+            autoScrollEnabled={autoScrollEnabled}
+            onAtBottomStateChange={onAtBottomStateChange}
+            onSend={sendMessage}
+            onStop={stopGenerating}
+            onRegenerate={regenerateLast}
+            availableModels={availableModels}
+            selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+          />
+
+          <AuxPanel />
+        </div>
+      </div>
+
       <Toaster richColors position='top-center' />
     </div>
   )

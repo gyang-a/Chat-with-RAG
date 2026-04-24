@@ -60,6 +60,183 @@ let messagesCollection = null
 let ragService = null
 const modelRegistry = buildModelRegistry()
 
+function toOpenAICompatEndpoint(url = '') {
+  // 兼容“基地址”与“完整 /chat/completions 地址”两种输入。
+  const trimmed = String(url || '').trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  if (trimmed.endsWith('/chat/completions')) return trimmed
+  return `${trimmed}/chat/completions`
+}
+
+function normalizeCustomModelName(value = '') {
+  const name = String(value || '').trim()
+  // 仅允许常见模型命名字符，避免注入与不可见字符污染。
+  if (!/^[A-Za-z0-9._:-]{1,80}$/.test(name)) return ''
+  return name
+}
+
+function getCustomModelEndpoint() {
+  // 自定义模型默认走 OpenAI 兼容地址，可通过环境变量覆盖。
+  const fromEnv = String(process.env.CUSTOM_MODEL_ENDPOINT || process.env.UPSTREAM_CHAT_URL || '').trim()
+  const fromActiveProvider = String(modelRegistry?.activeProvider?.endpoint || '').trim()
+  const fromAnyProvider = String(modelRegistry?.providers?.find((item) => item?.endpoint)?.endpoint || '').trim()
+  return toOpenAICompatEndpoint(fromEnv || fromActiveProvider || fromAnyProvider)
+}
+
+function normalizeUserCustomModels(rawList = []) {
+  if (!Array.isArray(rawList)) return []
+
+  const seen = new Set()
+  const list = []
+  for (const item of rawList) {
+    const name = normalizeCustomModelName(item?.name)
+    const apiKey = String(item?.apiKey || '').trim()
+    if (!name || !apiKey) continue
+    const uniqueKey = name.toLowerCase()
+    if (seen.has(uniqueKey)) continue
+    seen.add(uniqueKey)
+
+    list.push({
+      name,
+      apiKey,
+      updatedAt: Number(item?.updatedAt || Date.now()),
+      createdAt: Number(item?.createdAt || Date.now()),
+    })
+  }
+
+  return list
+}
+
+async function getUserCustomModels(username) {
+  const user = await getAuthUser(username)
+  return normalizeUserCustomModels(user?.customModels || [])
+}
+
+async function upsertUserCustomModel({ username, name, apiKey }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = normalizeCustomModelName(name)
+  const safeApiKey = String(apiKey || '').trim()
+  if (!safeUsername || !safeName || !safeApiKey) {
+    throw new Error('模型名称与 API Key 为必填')
+  }
+
+  const current = await getUserCustomModels(safeUsername)
+  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
+  const next = [...current]
+  const now = Date.now()
+
+  if (existsIndex >= 0) {
+    next[existsIndex] = {
+      ...next[existsIndex],
+      name: safeName,
+      apiKey: safeApiKey,
+      updatedAt: now,
+    }
+  } else {
+    if (next.length >= 30) {
+      throw new Error('自定义模型数量已达上限（30）')
+    }
+    next.push({
+      name: safeName,
+      apiKey: safeApiKey,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customModels: next,
+      },
+    },
+  )
+
+  return {
+    name: safeName,
+    updated: existsIndex >= 0,
+  }
+}
+
+async function deleteUserCustomModel({ username, modelName }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = normalizeCustomModelName(modelName)
+  if (!safeUsername || !safeName) {
+    throw new Error('模型名称不能为空')
+  }
+
+  const current = await getUserCustomModels(safeUsername)
+  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customModels: next,
+      },
+    },
+  )
+}
+
+async function getAvailableModelsForUser(username) {
+  const customModels = await getUserCustomModels(username)
+  const names = [...modelRegistry.allModels]
+  const builtInLower = new Set(names.map((item) => String(item || '').toLowerCase()))
+
+  for (const item of customModels) {
+    const lower = item.name.toLowerCase()
+    if (builtInLower.has(lower)) continue
+    names.push(item.name)
+  }
+
+  return {
+    models: names,
+    defaultModel: modelRegistry.defaultModel || names[0] || '',
+    customModels: customModels.map((item) => ({
+      name: item.name,
+      updatedAt: item.updatedAt,
+      createdAt: item.createdAt,
+    })),
+  }
+}
+
+async function resolveSelectionForUser(username, inputModel) {
+  const requestedModel = String(inputModel || '').trim()
+  if (!requestedModel) {
+    return modelRegistry.resolveSelection(requestedModel)
+  }
+
+  const customModels = await getUserCustomModels(username)
+  const hit = customModels.find((item) => item.name.toLowerCase() === requestedModel.toLowerCase())
+  if (hit) {
+    const endpoint = getCustomModelEndpoint()
+    return {
+      provider: {
+        id: `user-model:${requestedModel}`,
+        mode: 'openai',
+        endpoint,
+        apiKey: hit.apiKey,
+        authMode: 'auto',
+        requestModel: hit.name,
+        defaultModel: hit.name,
+        models: [hit.name],
+      },
+      model: hit.name,
+    }
+  }
+
+  return modelRegistry.resolveSelection(requestedModel)
+}
+
 function toBeijingISOString(input = Date.now()) {
   const utcMs = input instanceof Date ? input.getTime() : Number(input)
   const beijingMs = utcMs + 8 * 60 * 60 * 1000
@@ -98,6 +275,16 @@ async function initMongoDB() {
     },
     {
       $set: { avatarUrl: '' },
+    },
+  )
+
+  // 补齐历史用户缺失的自定义模型字段。
+  await users.updateMany(
+    {
+      $or: [{ customModels: { $exists: false } }, { customModels: null }],
+    },
+    {
+      $set: { customModels: [] },
     },
   )
 
@@ -1314,12 +1501,65 @@ app.post('/api/auth/logout', (_, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/models', requireAuth, (_, res) => {
+app.get('/api/models', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const result = await getAvailableModelsForUser(username)
   res.json({
     ok: true,
-    models: modelRegistry.allModels,
-    defaultModel: modelRegistry.defaultModel,
+    models: result.models,
+    defaultModel: result.defaultModel,
   })
+})
+
+app.get('/api/models/custom', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const result = await getAvailableModelsForUser(username)
+  res.json({
+    ok: true,
+    models: result.customModels,
+  })
+})
+
+app.post('/api/models/custom', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const modelName = String(req.body?.modelName || '').trim()
+  const apiKey = String(req.body?.apiKey || '').trim()
+
+  if (!modelName || !apiKey) {
+    res.status(400).json({ message: '模型名称和 API Key 为必填' })
+    return
+  }
+
+  const normalizedName = normalizeCustomModelName(modelName)
+  if (!normalizedName) {
+    res.status(400).json({ message: '模型名称仅支持字母、数字、点、下划线、中划线和冒号（1-80位）' })
+    return
+  }
+
+  if (modelRegistry.allModels.some((item) => item.toLowerCase() === normalizedName.toLowerCase())) {
+    res.status(400).json({ message: '模型名称与系统内置模型冲突，请更换名称' })
+    return
+  }
+
+  const result = await upsertUserCustomModel({
+    username,
+    name: normalizedName,
+    apiKey,
+  })
+
+  res.json({ ok: true, model: result })
+})
+
+app.delete('/api/models/custom/:modelName', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const modelName = String(req.params?.modelName || '').trim()
+  if (!modelName) {
+    res.status(400).json({ message: '缺少模型名称' })
+    return
+  }
+
+  await deleteUserCustomModel({ username, modelName })
+  res.json({ ok: true })
 })
 
 app.get('/api/kb/docs', requireAuth, async (req, res) => {
@@ -1536,6 +1776,7 @@ app.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => 
 })
 
 app.post('/api/chat/stream', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
   const {
     conversationId,
     message,
@@ -1543,16 +1784,18 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
     attachments = [],
     recentMessages = [],
     retrievalMode = 'hybrid',
+    ragTopK,
   } = req.body || {}
   if (!conversationId || !message) {
     res.status(400).json({ message: 'conversationId 和 message 为必填' })
     return
   }
 
-  const selection = modelRegistry.resolveSelection(model)
+  const selection = await resolveSelectionForUser(username, model)
   if (!selection) {
+    const available = await getAvailableModelsForUser(username)
     res.status(400).json({
-      message: `模型不可用，请从已配置模型中选择：${modelRegistry.allModels.join(', ')}`,
+      message: `模型不可用，请从已配置模型中选择：${available.models.join(', ')}`,
     })
     return
   }
@@ -1574,7 +1817,6 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
   // 发送首包注释，确保客户端尽快进入流式读取状态，避免空响应体误判
   res.write(': connected\n\n')
 
-  const username = String(req.auth?.username || '').trim()
   const normalizedRecentMessages = normalizeHistoryMessages(recentMessages)
   const historyMessages =
     normalizedRecentMessages.length > 0
@@ -1584,12 +1826,20 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
   const pinnedDocIds = (attachments || [])
     .map((item) => String(item?.docId || '').trim())
     .filter(Boolean)
+
+  // Top K 来自前端可调参数，服务端再次收敛范围避免异常输入。
+  const requestTopK = (() => {
+    const n = Number(ragTopK)
+    if (!Number.isFinite(n)) return undefined
+    return Math.min(20, Math.max(1, Math.floor(n)))
+  })()
     
   const ragPayload = await ragService.retrieveContext({
     username,
     query: String(message || ''),
     pinnedDocIds,
     retrievalMode: String(retrievalMode || 'hybrid').toLowerCase(),
+    topK: requestTopK,
   })
 
   if (ragPayload.refs.length > 0 || ragPayload.contextDocs.length > 0) {

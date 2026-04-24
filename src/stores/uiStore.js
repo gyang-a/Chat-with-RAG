@@ -10,12 +10,21 @@ export const useUIStore = create(
       mobileSidebarOpen: false,
       rightPanelOpen: false,
       darkMode: false,
+      ragEnabled: true,
+      ragTopK: 4,
       retrievalMode: 'hybrid',
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
+      // RAG 开关：关闭后聊天请求会降级为模型直答。
+      setRagEnabled: (ragEnabled) => set({ ragEnabled: Boolean(ragEnabled) }),
+      // TopK 用于右侧面板可视化设置，当前先在前端持久化，后续可透传后端。
+      setRagTopK: (ragTopK) =>
+        set({
+          ragTopK: Math.min(12, Math.max(1, Number(ragTopK) || 4)),
+        }),
       setRetrievalMode: (retrievalMode) =>
         set({
           retrievalMode:
@@ -32,6 +41,8 @@ export const useUIStore = create(
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
         darkMode: state.darkMode,
+        ragEnabled: state.ragEnabled,
+        ragTopK: state.ragTopK,
         retrievalMode: state.retrievalMode,
       }),
     },

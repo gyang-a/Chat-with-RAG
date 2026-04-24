@@ -1278,9 +1278,12 @@ export function createRagService({ db, uploadsDir }) {
     pinnedDocIds = [],
     kbId = DEFAULT_KB_ID,
     retrievalMode = 'hybrid',
+    topK,
     limit,
   }) {
-      const contextTopK = Math.max(1, Number(limit || getRagContextTopK()))
+      // 优先使用请求级 Top K；未传时回退环境变量配置。
+      const rawTopK = topK ?? limit
+      const contextTopK = Math.min(20, Math.max(1, Number(rawTopK || getRagContextTopK())))
 
     const safeUsername = String(username || '').trim()
     const safeQuery = normalizeText(query)
