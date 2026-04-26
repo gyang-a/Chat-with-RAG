@@ -1,12 +1,16 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\components\chat\MessageBubble.jsx
+import { lazy, Suspense } from 'react'
 import { Bot } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { MessageActions } from '@/components/chat/MessageActions'
 import { LoadingDots } from '@/components/chat/LoadingDots'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+
+const MarkdownRenderer = lazy(() =>
+  import('@/components/markdown/MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })),
+)
 
 function normalizeDisplayText(value) {
   if (value == null) return ''
@@ -36,6 +40,7 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
   const avatarUrl = useAuthStore((s) => s.avatarUrl)
   const username = useAuthStore((s) => s.username)
   const displayLabel = String(username || 'U').slice(0, 1).toUpperCase()
+  const normalizedContent = normalizeDisplayText(message.content || '')
   const streamingMinHeight =
     streaming && Number.isFinite(Number(message?.streamLayoutHeight))
       ? Math.max(46, Number(message.streamLayoutHeight))
@@ -104,10 +109,14 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
           )}
           {streaming ? (
             <pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>
-              {normalizeDisplayText(message.content || '')}
+              {normalizedContent}
             </pre>
           ) : (
-            <MarkdownRenderer content={normalizeDisplayText(message.content || '')} />
+            <Suspense
+              fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
+            >
+              <MarkdownRenderer content={normalizedContent} />
+            </Suspense>
           )}
           <MessageActions message={message} onRegenerate={onRegenerate} />
         </div>

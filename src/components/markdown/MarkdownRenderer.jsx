@@ -1,11 +1,12 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\components\markdown\MarkdownRenderer.jsx
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
-import rehypeKatex from 'rehype-katex'
 import { CodeBlock } from '@/components/markdown/CodeBlock'
+
+const MATH_MARKER_REGEX = /(\\\(|\\\[|\$\$?|\\begin\{(?:align\*?|aligned|gather\*?|cases|pmatrix|bmatrix|vmatrix)\})/
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
@@ -64,12 +65,48 @@ function normalizeMathDelimiters(markdown = '') {
 
 export function MarkdownRenderer({ content }) {
   const safeContent = normalizeMathDelimiters(normalizeMarkdownContent(content))
+  const hasMath = useMemo(() => MATH_MARKER_REGEX.test(safeContent), [safeContent])
+  const [mathPlugins, setMathPlugins] = useState({ remarkMath: null, rehypeKatex: null })
+
+  useEffect(() => {
+    if (!hasMath) return
+
+    let cancelled = false
+    Promise.all([import('remark-math'), import('rehype-katex'), import('katex/dist/katex.min.css')])
+      .then(([remarkMathModule, rehypeKatexModule]) => {
+        if (cancelled) return
+        setMathPlugins({
+          remarkMath: remarkMathModule.default,
+          rehypeKatex: rehypeKatexModule.default,
+        })
+      })
+      .catch(() => null)
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasMath])
+
+  const remarkPlugins = useMemo(() => {
+    if (hasMath && mathPlugins.remarkMath) {
+      return [remarkGfm, mathPlugins.remarkMath]
+    }
+    return [remarkGfm]
+  }, [hasMath, mathPlugins.remarkMath])
+
+  const rehypePlugins = useMemo(() => {
+    const plugins = [[rehypeSanitize, markdownSanitizeSchema]]
+    if (hasMath && mathPlugins.rehypeKatex) {
+      plugins.push(mathPlugins.rehypeKatex)
+    }
+    return plugins
+  }, [hasMath, mathPlugins.rehypeKatex])
 
   return (
     <div className='markdown-body text-base leading-7 text-foreground'>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         components={{
           code: ({ inline, className, children }) => (
             <CodeBlock inline={inline} className={className}>

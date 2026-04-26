@@ -124,16 +124,36 @@ function isEmbeddingEnabled() {
   return Boolean(getEmbeddingApiUrl() && getEmbeddingModel())
 }
 
-// 获取用户的嵌入配置，优先使用用户自定义配置，否则回退到全局环境变量。
-async function getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels) {
+// 获取用户的嵌入配置，优先读取外部注入的运行时配置（支持 custom/env 切换）。
+async function getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels, fnGetUserEmbeddingConfig = null) {
+  if (username && typeof fnGetUserEmbeddingConfig === 'function') {
+    try {
+      const runtimeConfig = await fnGetUserEmbeddingConfig(username)
+      if (runtimeConfig && typeof runtimeConfig === 'object') {
+        const apiUrl = String(runtimeConfig.apiUrl || '').trim()
+        const model = String(runtimeConfig.model || '').trim()
+        return {
+          source: String(runtimeConfig.source || ''),
+          apiUrl,
+          apiKey: String(runtimeConfig.apiKey || '').trim(),
+          model,
+          enabled: Boolean(apiUrl && model),
+        }
+      }
+    } catch (err) {
+      console.warn(`[RAG] get runtime embedding config failed: ${err?.message}`)
+    }
+  }
+
+  // 兼容旧调用路径：仅使用用户自定义模型 + 全局配置回退。
   if (username && typeof fnGetUserCustomEmbeddingModels === 'function') {
     try {
       const userModels = await fnGetUserCustomEmbeddingModels(username)
       if (userModels && userModels.length > 0) {
-        // 优先使用默认模型
         const defaultModel = userModels.find((m) => m.isDefault)
         const m = defaultModel || userModels[0]
         return {
+          source: 'custom',
           apiUrl: m.endpoint,
           apiKey: m.apiKey,
           model: m.name,
@@ -144,7 +164,9 @@ async function getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModel
       console.warn(`[RAG] get user embedding config failed: ${err?.message}`)
     }
   }
+
   return {
+    source: 'global',
     apiUrl: getEmbeddingApiUrl(),
     apiKey: getEmbeddingApiKey(),
     model: getEmbeddingModel(),
@@ -177,8 +199,17 @@ function cosineSimilarity(queryVector = [], queryNorm = 0, chunkVector = [], chu
 }
 
 // 调用 Embedding 接口批量向量化文本。
-async function requestEmbeddings(textList = [], username = '', fnGetUserCustomEmbeddingModels = null) {
-  const config = await getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels)
+async function requestEmbeddings(
+  textList = [],
+  username = '',
+  fnGetUserCustomEmbeddingModels = null,
+  fnGetUserEmbeddingConfig = null,
+) {
+  const config = await getEmbeddingConfigForUser(
+    username,
+    fnGetUserCustomEmbeddingModels,
+    fnGetUserEmbeddingConfig,
+  )
   if (!config.enabled) return []
   const embeddingApiUrl = config.apiUrl
   const embeddingApiKey = config.apiKey
@@ -217,8 +248,17 @@ async function requestEmbeddings(textList = [], username = '', fnGetUserCustomEm
 }
 
 // 对切块文本按批次生成 embedding 与范数元数据。
-async function buildChunkEmbeddings(chunks = [], username = '', fnGetUserCustomEmbeddingModels = null) {
-  const config = await getEmbeddingConfigForUser(username, fnGetUserCustomEmbeddingModels)
+async function buildChunkEmbeddings(
+  chunks = [],
+  username = '',
+  fnGetUserCustomEmbeddingModels = null,
+  fnGetUserEmbeddingConfig = null,
+) {
+  const config = await getEmbeddingConfigForUser(
+    username,
+    fnGetUserCustomEmbeddingModels,
+    fnGetUserEmbeddingConfig,
+  )
   if (!config.enabled) {
     return chunks.map(() => ({
       embedding: null,
@@ -237,7 +277,12 @@ async function buildChunkEmbeddings(chunks = [], username = '', fnGetUserCustomE
 
   for (let start = 0; start < chunks.length; start += embeddingBatchSize) {
     const slice = chunks.slice(start, start + embeddingBatchSize)
-    const vectors = await requestEmbeddings(slice, username, fnGetUserCustomEmbeddingModels)
+    const vectors = await requestEmbeddings(
+      slice,
+      username,
+      fnGetUserCustomEmbeddingModels,
+      fnGetUserEmbeddingConfig,
+    )
     for (let i = 0; i < vectors.length; i += 1) {
       const embedding = vectors[i]
       const norm = safeVectorNorm(embedding || [])
@@ -773,7 +818,7 @@ async function extractTextByFileType({ filePath, mimeType = '', ext = '' }) {
   return normalizeText(decodeBestEffort(buffer))
 }
 
-export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels }) {
+export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels, getUserEmbeddingConfig }) {
   // 创建 RAG 服务实例：绑定集合、队列与各业务能力函数。
   const docsCollection = db.collection('kb_docs')
   const chunksCollection = db.collection('kb_chunks')
@@ -782,6 +827,7 @@ export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels 
   const pendingIngestJobs = []
   // 保存用户嵌入模型获取函数，供 retrieveContext 等闭包函数使用。
   const fnGetUserCustomEmbeddingModels = getUserCustomEmbeddingModels || null
+  const fnGetUserEmbeddingConfig = getUserEmbeddingConfig || null
 
   async function findExistingDocByFileSha1({ username, kbId = DEFAULT_KB_ID, fileSha1 }) {
     const safeUsername = String(username || '').trim()
@@ -1071,7 +1117,12 @@ export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels 
 
     if (chunks.length > 0) {
       try {
-        embeddingMetaList = await buildChunkEmbeddings(chunks, safeUsername, fnGetUserCustomEmbeddingModels)
+        embeddingMetaList = await buildChunkEmbeddings(
+          chunks,
+          safeUsername,
+          fnGetUserCustomEmbeddingModels,
+          fnGetUserEmbeddingConfig,
+        )
       } catch (error) {
         // 向量化失败不阻断入库，回退到关键词检索链路。
         embeddingError = error?.message || '向量化失败'
@@ -1363,10 +1414,19 @@ export function createRagService({ db, uploadsDir, getUserCustomEmbeddingModels 
     let queryVectorNorm = 0
 
     if (useSemanticRetrieval) {
-      const embConfig = await getEmbeddingConfigForUser(safeUsername, fnGetUserCustomEmbeddingModels)
+      const embConfig = await getEmbeddingConfigForUser(
+        safeUsername,
+        fnGetUserCustomEmbeddingModels,
+        fnGetUserEmbeddingConfig,
+      )
       if (embConfig.enabled) {
         try {
-          const vectors = await requestEmbeddings([safeQuery], safeUsername, fnGetUserCustomEmbeddingModels)
+          const vectors = await requestEmbeddings(
+            [safeQuery],
+            safeUsername,
+            fnGetUserCustomEmbeddingModels,
+            fnGetUserEmbeddingConfig,
+          )
           queryVector = Array.isArray(vectors?.[0]) ? vectors[0] : []
           queryVectorNorm = safeVectorNorm(queryVector)
         } catch (error) {

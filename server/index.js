@@ -75,14 +75,6 @@ function normalizeCustomModelName(value = '') {
   return name
 }
 
-function getCustomModelEndpoint() {
-  // 自定义模型默认走 OpenAI 兼容地址，可通过环境变量覆盖。
-  const fromEnv = String(process.env.CUSTOM_MODEL_ENDPOINT || process.env.UPSTREAM_CHAT_URL || '').trim()
-  const fromActiveProvider = String(modelRegistry?.activeProvider?.endpoint || '').trim()
-  const fromAnyProvider = String(modelRegistry?.providers?.find((item) => item?.endpoint)?.endpoint || '').trim()
-  return toOpenAICompatEndpoint(fromEnv || fromActiveProvider || fromAnyProvider)
-}
-
 function normalizeUserCustomModels(rawList = []) {
   if (!Array.isArray(rawList)) return []
 
@@ -203,7 +195,7 @@ function normalizeUserCustomEmbeddingModels(rawList = []) {
     const name = String(item?.name || '').trim()
     const apiKey = String(item?.apiKey || '').trim()
     const endpoint = String(item?.endpoint || '').trim()
-    if (!name || !apiKey || !endpoint) continue
+    if (!name || !endpoint) continue
     const uniqueKey = name.toLowerCase()
     if (seen.has(uniqueKey)) continue
     seen.add(uniqueKey)
@@ -221,6 +213,130 @@ function normalizeUserCustomEmbeddingModels(rawList = []) {
   return list
 }
 
+function normalizeEmbeddingSource(value = '') {
+  const source = String(value || 'auto').trim().toLowerCase()
+  if (source === 'custom') return 'custom'
+  if (source === 'global' || source === 'env') return 'global'
+  return 'auto'
+}
+
+function getGlobalEmbeddingConfig() {
+  const endpoint = String(process.env.EMBEDDING_API_URL || '').trim()
+  const model = String(process.env.EMBEDDING_MODEL || '').trim()
+  const apiKey = String(process.env.EMBEDDING_API_KEY || '').trim()
+  return {
+    endpoint,
+    model,
+    apiKey,
+    configured: Boolean(endpoint && model),
+  }
+}
+
+async function getUserEmbeddingSource(username) {
+  const user = await getAuthUser(username)
+  return normalizeEmbeddingSource(user?.embeddingModelSource)
+}
+
+async function setUserEmbeddingSource({ username, source }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  if (!safeUsername) {
+    throw new Error('缺少用户信息')
+  }
+
+  const safeSource = normalizeEmbeddingSource(source)
+  if (safeSource === 'custom') {
+    const list = await getUserCustomEmbeddingModels(safeUsername)
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error('当前没有可用的自定义嵌入模型')
+    }
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        embeddingModelSource: safeSource,
+      },
+    },
+  )
+
+  return safeSource
+}
+
+async function resolveEmbeddingConfigForUser(username) {
+  const safeUsername = String(username || '').trim()
+  const selectedSource = safeUsername ? await getUserEmbeddingSource(safeUsername) : 'auto'
+  const userModels = safeUsername ? await getUserCustomEmbeddingModels(safeUsername) : []
+  const globalConfig = getGlobalEmbeddingConfig()
+  const defaultModel = userModels.find((item) => item.isDefault)
+  const firstModel = defaultModel || userModels[0] || null
+
+  if (selectedSource === 'custom') {
+    return {
+      selectedSource,
+      source: firstModel ? 'custom' : 'global',
+      configured: Boolean(firstModel?.endpoint && firstModel?.name),
+      endpoint: String(firstModel?.endpoint || ''),
+      model: String(firstModel?.name || ''),
+      apiKey: String(firstModel?.apiKey || ''),
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  if (selectedSource === 'global') {
+    return {
+      selectedSource,
+      source: 'global',
+      configured: globalConfig.configured,
+      endpoint: globalConfig.endpoint,
+      model: globalConfig.model,
+      apiKey: globalConfig.apiKey,
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  if (firstModel) {
+    return {
+      selectedSource,
+      source: 'custom',
+      configured: Boolean(firstModel.endpoint && firstModel.name),
+      endpoint: String(firstModel.endpoint || ''),
+      model: String(firstModel.name || ''),
+      apiKey: String(firstModel.apiKey || ''),
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  return {
+    selectedSource,
+    source: 'global',
+    configured: globalConfig.configured,
+    endpoint: globalConfig.endpoint,
+    model: globalConfig.model,
+    apiKey: globalConfig.apiKey,
+    globalConfigured: globalConfig.configured,
+    hasCustomModels: false,
+  }
+}
+
+async function getEmbeddingRuntimeConfigForUser(username) {
+  const config = await resolveEmbeddingConfigForUser(username)
+  return {
+    source: config.source,
+    apiUrl: config.endpoint,
+    apiKey: config.apiKey,
+    model: config.model,
+    enabled: Boolean(config.endpoint && config.model),
+  }
+}
+
 async function getUserCustomEmbeddingModels(username) {
   const user = await getAuthUser(username)
   return normalizeUserCustomEmbeddingModels(user?.customEmbeddingModels || [])
@@ -235,8 +351,8 @@ async function upsertUserCustomEmbeddingModel({ username, name, apiKey, endpoint
   const safeName = String(name || '').trim()
   const safeApiKey = String(apiKey || '').trim()
   const safeEndpoint = String(endpoint || '').trim()
-  if (!safeUsername || !safeName || !safeApiKey || !safeEndpoint) {
-    throw new Error('模型名称、接口地址和 API Key 均为必填')
+  if (!safeUsername || !safeName || !safeEndpoint) {
+    throw new Error('模型名称和接口地址为必填')
   }
 
   const current = await getUserCustomEmbeddingModels(safeUsername)
@@ -281,6 +397,7 @@ async function upsertUserCustomEmbeddingModel({ username, name, apiKey, endpoint
     {
       $set: {
         customEmbeddingModels: next,
+        embeddingModelSource: 'custom',
       },
     },
   )
@@ -305,12 +422,17 @@ async function deleteUserCustomEmbeddingModel({ username, modelName }) {
   const current = await getUserCustomEmbeddingModels(safeUsername)
   const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
 
+  const nextPatch = {
+    customEmbeddingModels: next,
+  }
+  if (next.length === 0) {
+    nextPatch.embeddingModelSource = 'auto'
+  }
+
   await usersCollection.updateOne(
     { username: safeUsername },
     {
-      $set: {
-        customEmbeddingModels: next,
-      },
+      $set: nextPatch,
     },
   )
 }
@@ -389,6 +511,7 @@ async function initMongoDB() {
         username: authUsername,
         password: authPassword,
         avatarUrl: '',
+        embeddingModelSource: 'auto',
         createdAt: toBeijingISOString(),
       },
     },
@@ -425,6 +548,16 @@ async function initMongoDB() {
     },
   )
 
+  // 历史用户若不存在嵌入来源配置，默认走 auto（有自定义优先，否则 env）。
+  await users.updateMany(
+    {
+      $or: [{ embeddingModelSource: { $exists: false } }, { embeddingModelSource: null }, { embeddingModelSource: '' }],
+    },
+    {
+      $set: { embeddingModelSource: 'auto' },
+    },
+  )
+
   const usersWithCreatedAt = await users.find({ createdAt: { $exists: true } }).project({ _id: 1, createdAt: 1 }).toArray()
   const bulkTimeFix = usersWithCreatedAt
     .map((item) => {
@@ -455,7 +588,12 @@ async function initMongoDB() {
   usersCollection = users
   conversationsCollection = conversations
   messagesCollection = messages
-  ragService = createRagService({ db, uploadsDir, getUserCustomEmbeddingModels })
+  ragService = createRagService({
+    db,
+    uploadsDir,
+    getUserCustomEmbeddingModels,
+    getUserEmbeddingConfig: getEmbeddingRuntimeConfigForUser,
+  })
   await ragService.ensureIndexes()
   mongodbClient = client
 }
@@ -480,6 +618,7 @@ async function createAuthUser(username, password) {
     username: safeUsername,
     password: safePassword,
     avatarUrl: '',
+    embeddingModelSource: 'auto',
     createdAt: toBeijingISOString(),
   })
 }
@@ -1706,38 +1845,57 @@ app.delete('/api/models/custom/:modelName', requireAuth, async (req, res) => {
 // 获取当前有效的嵌入模型配置（用户自定义优先，否则返回全局配置）
 app.get('/api/embedding-config', requireAuth, async (req, res) => {
   const username = String(req.auth?.username || '').trim()
-  const userModels = await getUserCustomEmbeddingModels(username)
-  if (userModels && userModels.length > 0) {
-    // 优先使用默认模型
-    const defaultModel = userModels.find((m) => m.isDefault)
-    const m = defaultModel || userModels[0]
-    res.json({
-      ok: true,
-      configured: true,
-      endpoint: m.endpoint,
-      model: m.name,
-      source: 'custom',
-    })
-    return
-  }
-  // 回退到全局环境变量
-  const globalEndpoint = String(process.env.EMBEDDING_API_URL || '').trim()
-  const globalModel = String(process.env.EMBEDDING_MODEL || '').trim()
+  const config = await resolveEmbeddingConfigForUser(username)
   res.json({
     ok: true,
-    configured: Boolean(globalEndpoint && globalModel),
-    endpoint: globalEndpoint,
-    model: globalModel,
-    source: 'global',
+    configured: Boolean(config.configured),
+    endpoint: config.endpoint,
+    model: config.model,
+    source: config.source,
+    selectedSource: config.selectedSource,
+    globalConfigured: Boolean(config.globalConfigured),
+    hasCustomModels: Boolean(config.hasCustomModels),
   })
 })
 
 app.get('/api/models/embedding', requireAuth, async (req, res) => {
   const username = String(req.auth?.username || '').trim()
   const result = await getUserCustomEmbeddingModels(username)
+  const selectedSource = await getUserEmbeddingSource(username)
+  const effectiveConfig = await resolveEmbeddingConfigForUser(username)
   res.json({
     ok: true,
     models: result,
+    selectedSource,
+    effectiveSource: effectiveConfig.source,
+    globalConfigured: Boolean(effectiveConfig.globalConfigured),
+  })
+})
+
+app.get('/api/models/embedding/source', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const selectedSource = await getUserEmbeddingSource(username)
+  const effectiveConfig = await resolveEmbeddingConfigForUser(username)
+  res.json({
+    ok: true,
+    selectedSource,
+    effectiveSource: effectiveConfig.source,
+    globalConfigured: Boolean(effectiveConfig.globalConfigured),
+    hasCustomModels: Boolean(effectiveConfig.hasCustomModels),
+  })
+})
+
+app.put('/api/models/embedding/source', requireAuth, async (req, res) => {
+  const username = String(req.auth?.username || '').trim()
+  const source = String(req.body?.source || '').trim()
+  const selectedSource = await setUserEmbeddingSource({ username, source })
+  const effectiveConfig = await resolveEmbeddingConfigForUser(username)
+  res.json({
+    ok: true,
+    selectedSource,
+    effectiveSource: effectiveConfig.source,
+    configured: Boolean(effectiveConfig.configured),
+    model: effectiveConfig.model,
   })
 })
 
@@ -1747,8 +1905,8 @@ app.post('/api/models/embedding', requireAuth, async (req, res) => {
   const apiKey = String(req.body?.apiKey || '').trim()
   const endpoint = String(req.body?.endpoint || '').trim()
 
-  if (!modelName || !apiKey || !endpoint) {
-    res.status(400).json({ message: '接口地址、模型名称和 API Key 均为必填' })
+  if (!modelName || !endpoint) {
+    res.status(400).json({ message: '接口地址和模型名称为必填' })
     return
   }
 
@@ -1798,6 +1956,8 @@ app.put('/api/models/embedding/:modelName/default', requireAuth, async (req, res
     endpoint: model.endpoint,
     isDefault: true,
   })
+
+  await setUserEmbeddingSource({ username, source: 'custom' })
 
   res.json({ ok: true })
 })

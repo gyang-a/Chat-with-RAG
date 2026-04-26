@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 const API_MODELS_URL = import.meta.env.VITE_MODELS_API_URL || '/api/models'
 const API_CUSTOM_MODELS_URL = '/api/models/custom'
 const API_EMBEDDING_MODELS_URL = '/api/models/embedding'
+const API_EMBEDDING_SOURCE_URL = '/api/models/embedding/source'
 
 function getAuthHeaders() {
   const token = useAuthStore.getState().token
@@ -145,5 +146,48 @@ export async function setDefaultEmbeddingModel(modelName = '') {
   if (!response.ok) {
     const data = await response.json().catch(() => null)
     throw new Error(data?.message || '设置默认嵌入模型失败')
+  }
+}
+
+export async function fetchEmbeddingModelSource() {
+  const response = await fetch(API_EMBEDDING_SOURCE_URL, {
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null)
+    throw new Error(data?.message || '读取嵌入模型来源失败')
+  }
+
+  const data = await response.json()
+  return {
+    selectedSource: String(data?.selectedSource || 'auto'),
+    effectiveSource: String(data?.effectiveSource || 'global'),
+    globalConfigured: Boolean(data?.globalConfigured),
+    hasCustomModels: Boolean(data?.hasCustomModels),
+  }
+}
+
+export async function updateEmbeddingModelSource(source = 'auto') {
+  const response = await fetch(API_EMBEDDING_SOURCE_URL, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getAuthHeaders() || {}),
+    },
+    body: JSON.stringify({ source: String(source || 'auto') }),
+  })
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null)
+    throw new Error(data?.message || '更新嵌入模型来源失败')
+  }
+
+  const data = await response.json()
+  return {
+    selectedSource: String(data?.selectedSource || 'auto'),
+    effectiveSource: String(data?.effectiveSource || 'global'),
+    configured: Boolean(data?.configured),
+    model: String(data?.model || ''),
   }
 }

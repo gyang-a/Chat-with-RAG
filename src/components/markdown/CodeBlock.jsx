@@ -3,10 +3,58 @@
 import { Children, isValidElement, useMemo, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { toast } from 'sonner'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import java from 'react-syntax-highlighter/dist/esm/languages/prism/java'
+import go from 'react-syntax-highlighter/dist/esm/languages/prism/go'
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
+import c from 'react-syntax-highlighter/dist/esm/languages/prism/c'
+import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp'
+import csharp from 'react-syntax-highlighter/dist/esm/languages/prism/csharp'
+import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust'
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { useUIStore } from '@/stores/uiStore'
 import { Button } from '@/components/ui/button'
+
+SyntaxHighlighter.registerLanguage('javascript', javascript)
+SyntaxHighlighter.registerLanguage('jsx', jsx)
+SyntaxHighlighter.registerLanguage('typescript', typescript)
+SyntaxHighlighter.registerLanguage('tsx', tsx)
+SyntaxHighlighter.registerLanguage('json', json)
+SyntaxHighlighter.registerLanguage('bash', bash)
+SyntaxHighlighter.registerLanguage('markdown', markdown)
+SyntaxHighlighter.registerLanguage('python', python)
+SyntaxHighlighter.registerLanguage('java', java)
+SyntaxHighlighter.registerLanguage('go', go)
+SyntaxHighlighter.registerLanguage('sql', sql)
+SyntaxHighlighter.registerLanguage('c', c)
+SyntaxHighlighter.registerLanguage('cpp', cpp)
+SyntaxHighlighter.registerLanguage('csharp', csharp)
+SyntaxHighlighter.registerLanguage('rust', rust)
+SyntaxHighlighter.registerLanguage('yaml', yaml)
+
+const LANGUAGE_ALIAS = {
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  yml: 'yaml',
+  sh: 'bash',
+  shell: 'bash',
+  md: 'markdown',
+  py: 'python',
+  cxx: 'cpp',
+  cc: 'cpp',
+  cs: 'csharp',
+}
 
 function flattenNodeText(node) {
   if (node == null) return ''
@@ -30,7 +78,8 @@ export function CodeBlock({ inline, className, children = '' }) {
   const language = useMemo(() => {
     // 兼容 js、tsx、c++、objective-c 等语言标识
     const match = /language-([^\s]+)/.exec(className || '')
-    return match?.[1] || 'text'
+    const rawLanguage = (match?.[1] || 'text').toLowerCase()
+    return LANGUAGE_ALIAS[rawLanguage] || rawLanguage
   }, [className])
 
   const text = flattenNodeText(Children.toArray(children)).replace(/\n$/, '')

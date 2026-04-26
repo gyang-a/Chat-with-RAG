@@ -20,6 +20,8 @@ import {
   deleteCustomEmbeddingModel,
   setDefaultEmbeddingModel,
   fetchCustomEmbeddingModels,
+  fetchEmbeddingModelSource,
+  updateEmbeddingModelSource,
 } from '@/services/modelApi'
 
 function formatTime(value) {
@@ -44,19 +46,22 @@ export function ModelManagerDialog({ open, onOpenChange }) {
   const [embModelName, setEmbModelName] = useState('')
   const [embApiKey, setEmbApiKey] = useState('')
   const [embModels, setEmbModels] = useState([])
+  const [embSelectedSource, setEmbSelectedSource] = useState('auto')
+  const [embEffectiveSource, setEmbEffectiveSource] = useState('global')
 
   // 通用 state
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [deletingName, setDeletingName] = useState('')
+  const [switchingEmbSource, setSwitchingEmbSource] = useState(false)
 
   const canSubmitChat = useMemo(() => {
     return endpoint.trim().length > 0 && modelName.trim().length > 0 && apiKey.trim().length > 0 && !submitting
   }, [apiKey, endpoint, modelName, submitting])
 
   const canSubmitEmb = useMemo(() => {
-    return embEndpoint.trim().length > 0 && embModelName.trim().length > 0 && embApiKey.trim().length > 0 && !submitting
-  }, [embApiKey, embEndpoint, embModelName, submitting])
+    return embEndpoint.trim().length > 0 && embModelName.trim().length > 0 && !submitting
+  }, [embEndpoint, embModelName, submitting])
 
   const refreshModels = async () => {
     setLoading(true)
@@ -82,12 +87,23 @@ export function ModelManagerDialog({ open, onOpenChange }) {
     }
   }
 
+  const refreshEmbeddingSource = async () => {
+    try {
+      const data = await fetchEmbeddingModelSource()
+      setEmbSelectedSource(data.selectedSource || 'auto')
+      setEmbEffectiveSource(data.effectiveSource || 'global')
+    } catch (error) {
+      toast.error(error?.message || '读取嵌入模型来源失败')
+    }
+  }
+
   useEffect(() => {
     if (!open) return
     if (activeTab === 'chat') {
       refreshModels().catch(() => null)
     } else {
       refreshEmbeddingModels().catch(() => null)
+      refreshEmbeddingSource().catch(() => null)
     }
   }, [open, activeTab])
 
@@ -134,6 +150,7 @@ export function ModelManagerDialog({ open, onOpenChange }) {
       setEmbEndpoint('')
       setEmbModelName('')
       await refreshEmbeddingModels()
+      await refreshEmbeddingSource()
       window.dispatchEvent(new Event('kria:embedding-models-updated'))
     } catch (error) {
       toast.error(error?.message || '保存嵌入模型失败')
@@ -164,6 +181,7 @@ export function ModelManagerDialog({ open, onOpenChange }) {
       await deleteCustomEmbeddingModel(name)
       toast.success('嵌入模型已删除')
       await refreshEmbeddingModels()
+      await refreshEmbeddingSource()
       window.dispatchEvent(new Event('kria:embedding-models-updated'))
     } catch (error) {
       toast.error(error?.message || '删除嵌入模型失败')
@@ -178,10 +196,28 @@ export function ModelManagerDialog({ open, onOpenChange }) {
       await setDefaultEmbeddingModel(name)
       toast.success('已设为默认嵌入模型')
       await refreshEmbeddingModels()
+      await refreshEmbeddingSource()
       // 通知嵌入模型配置已更新
       window.dispatchEvent(new Event('kria:embedding-models-updated'))
     } catch (error) {
       toast.error(error?.message || '设置默认失败')
+    }
+  }
+
+  const handleSwitchEmbeddingSource = async (source) => {
+    if (!source || switchingEmbSource) return
+
+    setSwitchingEmbSource(true)
+    try {
+      const result = await updateEmbeddingModelSource(source)
+      setEmbSelectedSource(result.selectedSource || source)
+      setEmbEffectiveSource(result.effectiveSource || 'global')
+      toast.success(source === 'global' ? '已切换为 env 嵌入模型，请对旧文档执行重建索引' : '已切换为自定义嵌入模型，请对旧文档执行重建索引')
+      window.dispatchEvent(new Event('kria:embedding-models-updated'))
+    } catch (error) {
+      toast.error(error?.message || '切换嵌入模型来源失败')
+    } finally {
+      setSwitchingEmbSource(false)
     }
   }
 
@@ -351,6 +387,39 @@ export function ModelManagerDialog({ open, onOpenChange }) {
         {/* 嵌入模型 Tab */}
         {activeTab === 'embedding' && (
           <div className='space-y-3'>
+            <div className='rounded-lg border border-border bg-muted/25 p-2'>
+              <p className='mb-2 text-xs text-muted-foreground'>当前来源: {embEffectiveSource === 'custom' ? '自定义嵌入模型' : 'env 全局嵌入模型'}</p>
+              <div className='flex flex-wrap gap-2'>
+                <Button
+                  size='sm'
+                  variant={embSelectedSource === 'custom' ? 'default' : 'outline'}
+                  className='h-7 px-2 text-xs'
+                  disabled={switchingEmbSource}
+                  onClick={() => handleSwitchEmbeddingSource('custom')}
+                >
+                  使用自定义
+                </Button>
+                <Button
+                  size='sm'
+                  variant={embSelectedSource === 'global' ? 'default' : 'outline'}
+                  className='h-7 px-2 text-xs'
+                  disabled={switchingEmbSource}
+                  onClick={() => handleSwitchEmbeddingSource('global')}
+                >
+                  使用 env
+                </Button>
+                <Button
+                  size='sm'
+                  variant={embSelectedSource === 'auto' ? 'default' : 'outline'}
+                  className='h-7 px-2 text-xs'
+                  disabled={switchingEmbSource}
+                  onClick={() => handleSwitchEmbeddingSource('auto')}
+                >
+                  自动
+                </Button>
+              </div>
+            </div>
+
             <label className='space-y-1'>
               <span className='text-xs text-muted-foreground'>接口地址</span>
               <input
@@ -377,7 +446,7 @@ export function ModelManagerDialog({ open, onOpenChange }) {
                 <input
                   value={embApiKey}
                   onChange={(event) => setEmbApiKey(event.target.value)}
-                  placeholder='本地模型可填任意值'
+                  placeholder='可留空（本地模型通常不需要）'
                   className='h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground'
                   type='password'
                 />

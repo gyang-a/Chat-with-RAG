@@ -429,8 +429,10 @@ export function KnowledgeBasePanel({ compact = false }) {
                 <p className='mt-1 text-xs text-muted-foreground'>状态: {statusLabel(doc.parseStatus)}</p>
                 <p className='mt-1 text-xs text-muted-foreground'>分块数: {Number(doc.chunkCount || 0)}</p>
                 <p className='mt-1 text-xs text-muted-foreground'>更新时间: {formatTime(doc.updatedAt)}</p>
-                {doc.parseStatus === 'failed' && doc.parseError && (
-                  <p className='mt-1 text-xs text-red-500'>失败原因: {doc.parseError}</p>
+                {doc.parseError && (
+                  <p className={`mt-1 text-xs ${doc.parseStatus === 'failed' ? 'text-red-500' : 'text-amber-600'}`}>
+                    {doc.parseStatus === 'failed' ? '失败原因' : '索引提示'}: {doc.parseError}
+                  </p>
                 )}
 
                 <div className='mt-2 flex items-center gap-2'>
