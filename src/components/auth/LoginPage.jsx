@@ -4,15 +4,15 @@ import { Eye, EyeOff, KeyRound, ShieldCheck, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/authStore'
 
-//  把 class 移到组件外面，解决编译报错
+//  粒子类，负责单个粒子的属性和行为
 class Particle {
   constructor(width, height) {
     this.x = Math.random() * width
     this.y = Math.random() * height
-    this.r = Math.random() *3  + 1
-    this.speedX = (Math.random() - 0.5) * 0.4
-    this.speedY = (Math.random() - 0.5) * 0.4
-    this.opacity = Math.random() * 0.1 + 0.2
+    this.r = Math.random() * 2.5 + 0.6
+    this.speedX = (Math.random() - 0.5) * 0.25
+    this.speedY = (Math.random() - 0.5) * 0.25
+    this.opacity = Math.random() * 0.5 + 0.25
   }
 
   update(width, height) {
@@ -25,10 +25,24 @@ class Particle {
   }
 
   draw(ctx) {
+    // 添加发光效果
+    ctx.shadowColor = 'rgba(56, 189, 248, 0.8)'
+    // 适当增加模糊半径，增强发光效果
+    ctx.shadowBlur = 12
+// 1. 创建径向渐变（中心亮，外围透明）
+    const gradient = ctx.createRadialGradient(
+      this.x, this.y, 0,
+      this.x, this.y, this.r
+    )
+    gradient.addColorStop(0, `rgba(186, 230, 253, ${this.opacity})`)
+    gradient.addColorStop(1, `rgba(56, 189, 248, 0)`)
+
     ctx.beginPath()
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(56, 189, 248, ${this.opacity})`
+    ctx.fillStyle = gradient
     ctx.fill()
+//
+    ctx.shadowBlur = 0
   }
 }
 
