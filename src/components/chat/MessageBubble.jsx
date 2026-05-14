@@ -118,6 +118,27 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
               <MarkdownRenderer content={normalizedContent} />
             </Suspense>
           )}
+          
+          {!streaming && message.refs && message.refs.length > 0 && (
+            <div className='mt-3 space-y-1.5 border-t border-border pt-3'>
+              <div className='text-xs font-semibold text-muted-foreground'>参考来源：</div>
+              <div className='flex flex-wrap gap-2'>
+                {message.refs.map((r, i) => (
+                  <a 
+                    key={i} 
+                    href={r.url || '#'} 
+                    target='_blank' 
+                    rel='noreferrer'
+                    className='inline-flex max-w-[200px] items-center gap-1 overflow-hidden rounded-md border border-border bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted md:max-w-[300px]'
+                    title={r.snippet}
+                  >
+                    <span className='truncate'>{r.name || '外部来源'}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          
           <MessageActions message={message} onRegenerate={onRegenerate} />
         </div>
       </div>

@@ -53,6 +53,7 @@ export function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  //可以使用shallow
   const login = useAuthStore((s) => s.login)
   const register = useAuthStore((s) => s.register)
   const rememberMe = useAuthStore((s) => s.rememberMe)
@@ -102,7 +103,7 @@ export function LoginPage() {
     event.preventDefault()
     await submitCurrent()
   }
-
+// 处理回车提交，兼容中文输入法组合键
   const onInputKeyDown = (event) => {
     if (event.key !== 'Enter') return
     if (event.nativeEvent?.isComposing) return

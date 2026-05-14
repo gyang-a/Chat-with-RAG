@@ -1,6 +1,5 @@
 // 导入React核心Hook
 import { useCallback, useEffect, useRef } from 'react'
-import { layout, prepare } from '@chenglou/pretext'
 // 导入SSE流式聊天接口
 import { streamChat } from '@/services/chatApi'
 // 导入用户输入内容过滤工具（防XSS/非法字符）
@@ -39,28 +38,7 @@ function normalizeDeltaText(value) {
   return ''
 }
 
-// 预估流式文本展示高度时使用的字体与布局参数（需与消息气泡样式尽量保持一致）
-const STREAM_LAYOUT_FONT = '400 14px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif'
-const STREAM_LAYOUT_LINE_HEIGHT = 28  //行高，影响文本高度计算，需根据实际消息气泡样式调整
-const STREAM_LAYOUT_MAX_WIDTH = 700  // 流式文本最大宽度，需根据实际消息气泡样式调整，影响换行和高度计算
-const STREAM_LAYOUT_PADDING_Y = 24   // 上下内边距总和，影响最小高度计算
-const STREAM_LAYOUT_MIN_HEIGHT = 46  // 最小高度，保证气泡初始状态不至于过于扁平
 const STREAM_FLUSH_MIN_INTERVAL = 16.6 // 流式文本最小刷新间隔，单位ms，过短可能导致性能问题，过长可能感觉卡顿，需根据实际测试调整
-const STREAM_MEASURE_MIN_INTERVAL = 120   // 流式文本高度测量的最小间隔，单位ms，避免过于频繁测量导致性能问题
-const STREAM_HEIGHT_UPDATE_THRESHOLD = 8 // 仅当高度变化超过8px时才更新，避免频繁微调导致的视觉抖动
-
-// 预估流式文本的展示高度，动态调整消息气泡大小，提升视觉体验。
-function estimateStreamingHeight(text = '') {
-  if (!text) return STREAM_LAYOUT_MIN_HEIGHT
-
-  try {
-    const prepared = prepare(text, STREAM_LAYOUT_FONT, { whiteSpace: 'pre-wrap' })
-    const { height } = layout(prepared, STREAM_LAYOUT_MAX_WIDTH, STREAM_LAYOUT_LINE_HEIGHT)
-    return Math.max(STREAM_LAYOUT_MIN_HEIGHT, Math.ceil(height + STREAM_LAYOUT_PADDING_Y))
-  } catch {
-    return STREAM_LAYOUT_MIN_HEIGHT
-  }
-}
 
 /**
  * 自定义Hook：处理AI聊天的 SSE 流式响应
@@ -111,6 +89,7 @@ export function useSSEChat() {
       const rawText = typeof payload === 'string' ? payload : payload?.text || ''
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : []
       const model = typeof payload === 'object' ? String(payload?.model || '').trim() : ''
+      const useWebSearch = typeof payload === 'object' ? Boolean(payload?.useWebSearch) : false
       // 关闭 RAG 后统一降级为模型直答。
       const effectiveRetrievalMode = ragEnabled ? retrievalMode : 'direct'
       // Top K 从 UI 状态读取并在发送前做一次兜底校验。
@@ -149,10 +128,7 @@ export function useSSEChat() {
       let deltaBuffer = ''
       // 使用rAF将多次delta合并到同一帧，降低主线程抖动
       let rafId = null
-      let latestMeasuredAt = 0
-      let latestMeasuredHeight = STREAM_LAYOUT_MIN_HEIGHT
       let latestFlushAt = 0
-      let pendingHeightPatch = false
 
       /**
        * 刷新缓冲：将缓存的文字更新到AI消息
@@ -163,29 +139,14 @@ export function useSSEChat() {
         deltaBuffer = '' // 清空缓冲
         const nextContent = (assistant.content || '') + nextChunk
 
-        // 高度测量做轻节流，避免每一帧都触发文本测量
-        const now = Date.now()
-        if (now - latestMeasuredAt >= STREAM_MEASURE_MIN_INTERVAL || nextChunk.length >= 120) {
-          const measuredHeight = estimateStreamingHeight(nextContent)
-          if (Math.abs(measuredHeight - latestMeasuredHeight) >= STREAM_HEIGHT_UPDATE_THRESHOLD) {
-            latestMeasuredHeight = measuredHeight
-            pendingHeightPatch = true
-          }
-          latestMeasuredAt = now
-        }
-
         // 更新全局状态，渲染文字
         patchAssistantMessage(assistant.id, {
           content: nextContent,
-          ...(pendingHeightPatch ? { streamLayoutHeight: latestMeasuredHeight } : {}),
         }, { updateConversationMeta: false })
+        
         // 同步更新本地缓存的消息内容
         assistant.content = nextContent
-        if (pendingHeightPatch) {
-          assistant.streamLayoutHeight = latestMeasuredHeight
-          pendingHeightPatch = false
-        }
-        latestFlushAt = now
+        latestFlushAt = Date.now()
       }
 
       /**
@@ -214,6 +175,7 @@ export function useSSEChat() {
           recentMessages,
           retrievalMode: effectiveRetrievalMode,
           ragTopK: safeRagTopK,
+          useWebSearch,
           signal: controller.signal, // 绑定中断信号
           // 接收后端推送的事件
           onEvent: (event) => {
@@ -226,15 +188,7 @@ export function useSSEChat() {
                 rafId = null
               }
 
-              // 完成前强制再测一次，保证最后高度准确
-              if (assistant.content) {
-                latestMeasuredHeight = estimateStreamingHeight(assistant.content)
-              }
-
               flushDelta() // 刷新剩余缓冲
-              patchAssistantMessage(assistant.id, {
-                streamLayoutHeight: latestMeasuredHeight,
-              })
               setGenerating(false) // 关闭加载状态
               return
             }

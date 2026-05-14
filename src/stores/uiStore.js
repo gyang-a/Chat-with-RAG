@@ -37,7 +37,7 @@ export const useUIStore = create(
         }),
     }),
     {
-      name: 'Kria_ui_v1',
+      name: '灵犀_ui',
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
         darkMode: state.darkMode,

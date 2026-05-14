@@ -11,9 +11,8 @@ const quickCards = [
   '解释一下SSE和WebSocket的区别',
   '帮我润色一段中文邮件',
 ]
-
+// 统一将各种 content 结构归一成字符串，避免渲染阶段类型分支膨胀。
 function normalizeTextContent(value) {
-  // 统一将各种 content 结构归一成字符串，避免渲染阶段类型分支膨胀。
   if (value == null) return ''
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
@@ -28,9 +27,8 @@ function normalizeTextContent(value) {
 
   return ''
 }
-
+// 修复历史数据中可能出现的非字符串 content，保证恢复后的消息可直接渲染。
 function normalizePersistedMessages(messagesByConversation = {}) {
-  // 修复历史数据中可能出现的非字符串 content，保证恢复后的消息可直接渲染。
   const next = {}
   for (const [conversationId, list] of Object.entries(messagesByConversation)) {
     next[conversationId] = Array.isArray(list)
@@ -42,9 +40,8 @@ function normalizePersistedMessages(messagesByConversation = {}) {
   }
   return next
 }
-
+// 构建新会话默认结构。
 function buildNewConversation() {
-  // 构建新会话默认结构。
   const id = createId('conv')
   return {
     id,
@@ -57,9 +54,8 @@ function buildNewConversation() {
     refs: [],
   }
 }
-
+ // 构建空历史快照，供初始化与清空场景复用。
 function buildEmptyChatSnapshot() {
-  // 构建空历史快照，供初始化与清空场景复用。
   const conversation = buildNewConversation()
   return {
     conversations: [conversation],
@@ -69,9 +65,8 @@ function buildEmptyChatSnapshot() {
     generating: false,
   }
 }
-
+// 对远端或本地快照做容错归一，避免脏数据破坏 UI。
 function normalizeChatSnapshot(snapshot) {
-  // 对远端或本地快照做容错归一，避免脏数据破坏 UI。
   const safeConversations =
     Array.isArray(snapshot?.conversations) && snapshot.conversations.length > 0
       ? snapshot.conversations
@@ -100,9 +95,8 @@ export const useChatStore = create(
       generating: false,
       streamError: '',
       quickCards,
-
+// 账号切换时保存旧账号历史并加载新账号历史桶
       syncAuthOwner: (username) => {
-        // 账号切换时保存旧账号历史并加载新账号历史桶。
         const safeUsername = String(username || '').trim()
         const {
           ownerUsername,
@@ -220,7 +214,7 @@ export const useChatStore = create(
           }
         })
       },
-
+      // 注入远端历史快照，用于登录后同步服务器保存的历史数据。
       applyRemoteHistorySnapshot: (snapshot) => {
         const normalized = normalizeChatSnapshot(snapshot)
         set((state) => {
@@ -416,7 +410,7 @@ export const useChatStore = create(
       },
     }),
     {
-      name: 'Kria_state_v1',
+      name: '灵犀',
       version: 3,
       partialize: (state) => ({
         ownerUsername: state.ownerUsername,

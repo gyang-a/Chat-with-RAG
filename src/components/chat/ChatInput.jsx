@@ -8,8 +8,8 @@ import { useChatStore } from '@/stores/chatStore'
 import { useUIStore } from '@/stores/uiStore'
 import { createId } from '@/lib/utils'
 
-const ALLOWED_TYPES = ['application/pdf', 'text/plain', 'text/markdown']
-const ALLOWED_EXTS = new Set(['pdf', 'txt', 'md'])
+const ALLOWED_TYPES = ['application/pdf', 'text/plain', 'text/markdown', 'image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const ALLOWED_EXTS = new Set(['pdf', 'txt', 'md', 'jpg', 'jpeg', 'png', 'gif', 'webp'])
 const MAX_FILES = 5
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
@@ -41,6 +41,7 @@ export function ChatInput({
 }) {
   const [text, setText] = useState('')
   const [pendingFiles, setPendingFiles] = useState([])
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false)
   const generating = useChatStore((s) => s.generating)
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel)
@@ -187,7 +188,7 @@ export function ChatInput({
 
     try {
       const attachments = pendingFiles.length > 0 ? await uploadPendingFiles() : []
-      await onSend({ text: draftText, attachments, model: selectedModel })
+      await onSend({ text: draftText, attachments, model: selectedModel, useWebSearch: isWebSearchEnabled })
       setPendingFiles([])
     } catch (error) {
       setText(draftText)
@@ -225,7 +226,7 @@ export function ChatInput({
     const accepted = []
     for (const file of selected.slice(0, slots)) {
       if (!isAllowedChatFile(file)) {
-        toast.error(`文件 ${file.name} 类型不支持，仅支持 PDF/TXT/Markdown`)
+        toast.error(`文件 ${file.name} 类型不支持，仅支持图片/PDF/TXT/Markdown`)
         continue
       }
       if (file.size > MAX_FILE_SIZE) {
@@ -343,7 +344,7 @@ export function ChatInput({
                 className='hidden'
                 type='file'
                 multiple
-                accept='.pdf,.txt,.md,text/markdown'
+                accept='.pdf,.txt,.md,text/markdown,image/jpeg,image/png,image/gif,image/webp'
                 onChange={handleSelectFile}
               />
 
@@ -358,8 +359,20 @@ export function ChatInput({
                 <Paperclip className='mr-1.5 h-3.5 w-3.5' />附件
               </Button>
 
-              <Button size='sm' variant='ghost' className='h-8 rounded-lg px-2 text-xs text-muted-foreground' title='联网搜索（敬请期待）'>
-                <Globe className='mr-1.5 h-3.5 w-3.5' />联网搜索
+              <Button
+                type='button'
+                size='sm'
+                variant='ghost'
+                className={`h-8 rounded-lg px-2 text-xs transition-colors ${
+                  isWebSearchEnabled 
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-400' 
+                    : 'text-muted-foreground'
+                }`}
+                title='联网搜索'
+                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+              >
+                <Globe className={`mr-1.5 h-3.5 w-3.5 ${isWebSearchEnabled ? 'text-blue-500' : ''}`} />
+                联网搜索
               </Button>
 
               <Button

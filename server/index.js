@@ -14,6 +14,7 @@ import { Buffer } from 'node:buffer'
 import { MongoClient } from 'mongodb'
 import { buildModelRegistry } from './modelRegistry.js'
 import { createRagService } from './ragService.js'
+import { performWebSearch } from './searchService.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -48,7 +49,7 @@ const authTokenTtlMs = Number(process.env.AUTH_TOKEN_TTL_MS || 7 * 24 * 60 * 60 
 const mongodbUri = (process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017').trim()
 const mongodbDbName = (process.env.MONGODB_DB_NAME || 'chat_app').trim()
 const systemPrompt =
-  process.env.UPSTREAM_SYSTEM_PROMPT || '你是一个专业、简洁、准确的中文 AI 助手。'
+  process.env.UPSTREAM_SYSTEM_PROMPT || '你是一个专业、简洁、准确的中文 AI 助手,只说中文。'
 const attachmentTextCache = new Map()
 const preferredAuthStrategyCache = new Map()
 const serverVersion = '2026-03-24-auth-fallback-v4'
@@ -948,7 +949,7 @@ async function loadConversationHistoryMessages({ username, conversationId }) {
   return normalizeHistoryMessages(list)
 }
 
-function buildUpstreamMessages({ historyMessages = [], userContent = '' }) {
+function buildUpstreamMessages({ historyMessages = [], userContent = '', images = [] }) {
   const safeUserContent = String(userContent || '').trim()
   const normalizedHistory = normalizeHistoryMessages(historyMessages)
   const tailHistory = maxContextMessages > 0
@@ -964,10 +965,21 @@ function buildUpstreamMessages({ historyMessages = [], userContent = '' }) {
     }
   }
 
+  let finalUserMessageContent = safeUserContent
+  if (images.length > 0) {
+    finalUserMessageContent = [
+      { type: 'text', text: safeUserContent },
+      ...images.map(img => ({
+        type: 'image_url',
+        image_url: { url: img }
+      }))
+    ]
+  }
+
   return [
     { role: 'system', content: systemPrompt },
     ...dedupedHistory,
-    { role: 'user', content: safeUserContent },
+    { role: 'user', content: finalUserMessageContent },
   ]
 }
 
@@ -1412,6 +1424,9 @@ async function buildAttachmentContext(attachments = []) {
       }
     } else if (ext === '.pdf' || mimeType === 'application/pdf') {
       section += '\n说明: 当前未启用 PDF 文本解析，模型仅可看到该文件名。'
+    } else if (mimeType.startsWith('image/') || ['.jpg','.jpeg','.png','.gif','.webp'].includes(ext)) {
+      // 忽略，在后续流程会被作为独立 image_url 传给多模态大模型。
+      continue
     } else if (attachments.length > 0) {
       section += '\n说明: 当前附件未识别为可解析文本，已仅传递文件元信息。'
     }
@@ -1446,6 +1461,31 @@ async function pipeOpenAICompatStream({
 
   try {
     const attachmentContext = await buildAttachmentContext(attachments)
+    
+    // 提取图片附件并转换为 Base64
+    const images = []
+    for (const item of attachments) {
+      const mimeType = String(item?.mimeType || '').toLowerCase()
+      const ext = resolveAttachmentExt(item)
+      const isImage = mimeType.startsWith('image/') || ['.jpg','.jpeg','.png','.gif','.webp'].includes(ext)
+      if (isImage) {
+        const fileName = resolveUploadedFileName(item)
+        if (fileName) {
+          try {
+            const filePath = path.resolve(uploadsDir, fileName)
+            if (fs.existsSync(filePath)) {
+              const fileBuffer = await fs.promises.readFile(filePath)
+              const base64 = fileBuffer.toString('base64')
+              const mime = mimeType || `image/${ext.replace('.', '') || 'jpeg'}`
+              images.push(`data:${mime};base64,${base64}`)
+            }
+          } catch (e) {
+            console.warn('读取图片附件失败', fileName, e)
+          }
+        }
+      }
+    }
+
     const contextBlocks = []
     if (ragContext) {
       contextBlocks.push(`请优先依据以下知识库片段回答，若证据不足请明确说明：\n\n${ragContext}`)
@@ -1466,6 +1506,7 @@ async function pipeOpenAICompatStream({
       messages: buildUpstreamMessages({
         historyMessages,
         userContent,
+        images
       }),
     })
 
@@ -2185,6 +2226,7 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
     recentMessages = [],
     retrievalMode = 'hybrid',
     ragTopK,
+    useWebSearch = false,
   } = req.body || {}
   if (!conversationId || !message) {
     res.status(400).json({ message: 'conversationId 和 message 为必填' })
@@ -2241,6 +2283,35 @@ app.post('/api/chat/stream', requireAuth, async (req, res) => {
     retrievalMode: String(retrievalMode || 'hybrid').toLowerCase(),
     topK: requestTopK,
   })
+
+  // 如果启用了联网搜索，我们进行联网搜索并合并结果
+  if (useWebSearch) {
+    try {
+      const searchResults = await performWebSearch(message)
+      if (searchResults) {
+        ragPayload.promptContext += `\n\n[联网搜索结果]\n${searchResults.text}`
+        // 添加真的 ref 来源通知给前端
+        const webRefs = searchResults.refs.map((r, idx) => ({
+          viewUrl: r.url,
+          url: r.url,
+          snippet: r.snippet,
+          score: 1,
+          docId: `web-search-${idx}`,
+          chunkId: `web-search-${idx}`,
+          name: r.name,
+        }))
+        ragPayload.refs = [...webRefs, ...ragPayload.refs]
+        ragPayload.contextDocs.unshift({
+          docId: 'web-search',
+          name: '联网搜索结果 (共' + webRefs.length + '条)',
+          score: 1,
+          hitChunks: webRefs.length,
+        })
+      }
+    } catch (err) {
+      console.warn('Web search error', err)
+    }
+  }
 
   if (ragPayload.refs.length > 0 || ragPayload.contextDocs.length > 0) {
     sendSSE(res, {

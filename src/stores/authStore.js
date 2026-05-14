@@ -9,11 +9,10 @@ import {
   uploadAuthAvatar,
 } from '@/services/authApi'
 
-const AUTH_LOCAL_KEY = 'Kria_auth_v1_local'
-const AUTH_SESSION_KEY = 'Kria_auth_v1_session'
-
+const AUTH_LOCAL_KEY = '灵犀_auth_v1_local'
+const AUTH_SESSION_KEY = '灵犀_auth_v1_session'
+// 根据 rememberMe 在 localStorage/sessionStorage 之间切换持久化位置
 function resolveAuthStorage() {
-  // 根据 rememberMe 在 localStorage/sessionStorage 之间切换持久化位置
   return {
     getItem: () => {
       if (typeof window === 'undefined') return null
@@ -151,7 +150,7 @@ export const useAuthStore = create(
       },
     }),
     {
-      name: 'Kria_auth_v1',
+      name: '灵犀_auth',
       storage: createJSONStorage(resolveAuthStorage),
       partialize: (state) => ({
         token: state.token,

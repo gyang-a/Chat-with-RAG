@@ -21,6 +21,7 @@ export async function streamChat({
   recentMessages = [],// 最近消息历史（用于上下文）
   retrievalMode = 'hybrid',
   ragTopK,
+  useWebSearch = false,
   signal,//AbortSignal，用于取消请求
   onEvent,// 收到 SSE 事件时的回调
   onError, // 错误回调
@@ -29,6 +30,7 @@ export async function streamChat({
 
   // 向后端发起流式聊天请求，逐段回调 onEvent 给上层拼接内容。
   const token = useAuthStore.getState().token
+
   const response = await fetch(API_CHAT_URL, {
     method: 'POST',
     headers: {
@@ -43,6 +45,7 @@ export async function streamChat({
       recentMessages,
       retrievalMode,
       ragTopK: safeTopK,
+      useWebSearch,
     }),
     signal,
   })
@@ -54,6 +57,7 @@ export async function streamChat({
       messageText = '登录已失效，请重新登录'
     } else {
       try {
+        //尝试从响应体中提取后端错误信息，提供更具体的提示。
         const data = await response.json()
         messageText = data?.message || messageText
       } catch {

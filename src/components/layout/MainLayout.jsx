@@ -85,9 +85,10 @@ export function MainLayout() {
     if (!token || !ownerUsername) return
 
     let cancelled = false
+    // 切换账号时先暂停保存，等新历史拉取并注入后再恢复。
     suppressSaveRef.current = true
     hydratedOwnerRef.current = ''
-
+     // 拉取服务端信息并应用到本地状态
     fetchHistorySnapshot()
       .then((snapshot) => {
         if (cancelled) return
@@ -102,7 +103,7 @@ export function MainLayout() {
       .finally(() => {
         if (cancelled) return
         setTimeout(() => {
-          suppressSaveRef.current = false
+          suppressSaveRef.current = false// 恢复保存
         }, 0)
       })
 
