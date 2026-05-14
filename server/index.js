@@ -830,8 +830,12 @@ const allowedMime = new Set([
   'text/markdown',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
 ])
-const allowedExt = new Set(['.pdf', '.txt', '.md', '.doc', '.docx'])
+const allowedExt = new Set(['.pdf', '.txt', '.md', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'])
 
 function decodeUploadFileName(name = '') {
   try {
@@ -867,7 +871,7 @@ const upload = multer({
       cb(null, true)
       return
     }
-    cb(new Error('仅支持 PDF/TXT/Markdown/DOC/DOCX 文件'))
+    cb(new Error('不支持的文件类型：' + ext))
   },
 })
 
