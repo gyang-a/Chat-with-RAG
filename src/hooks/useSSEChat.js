@@ -38,7 +38,7 @@ function normalizeDeltaText(value) {
   return ''
 }
 
-const STREAM_FLUSH_MIN_INTERVAL = 16.6 // 流式文本最小刷新间隔，单位ms，过短可能导致性能问题，过长可能感觉卡顿，需根据实际测试调整
+const STREAM_FLUSH_MIN_INTERVAL = 40 // 增加刷新间隔以减缓大数据块造成的渲染抖动，达到限流缓冲打字机效果
 
 /**
  * 自定义Hook：处理AI聊天的 SSE 流式响应
@@ -126,17 +126,20 @@ export function useSSEChat() {
 
       // 流式文本缓冲池：缓存后端推送的文字片段，减少渲染次数
       let deltaBuffer = ''
-      // 使用rAF将多次delta合并到同一帧，降低主线程抖动
-      let rafId = null
-      let latestFlushAt = 0
+      // 定时器 ID
+      let flushIntervalId = null
 
       /**
-       * 刷新缓冲：将缓存的文字更新到AI消息
+       * 刷新缓冲：将缓存的文字定量截取更新到AI消息
        */
       const flushDelta = () => {
         if (!assistant?.id || !deltaBuffer) return
-        const nextChunk = deltaBuffer
-        deltaBuffer = '' // 清空缓冲
+
+        // 每次最多截取定量字符(如3个字符)，限制吐字速度，制造平滑的打字机假象
+        const chunkSize = Math.max(1, Math.min(3, deltaBuffer.length))
+        const nextChunk = deltaBuffer.slice(0, chunkSize)
+        deltaBuffer = deltaBuffer.slice(chunkSize)
+
         const nextContent = (assistant.content || '') + nextChunk
 
         // 更新全局状态，渲染文字
@@ -146,26 +149,38 @@ export function useSSEChat() {
         
         // 同步更新本地缓存的消息内容
         assistant.content = nextContent
-        latestFlushAt = Date.now()
       }
 
       /**
-       * 调度刷新：节流执行，40ms内只更新一次
+       * 调度刷新：使用 setInterval 循环消费缓冲区
        */
-      const scheduleFlush = () => {
-        if (rafId != null) return
-        rafId = requestAnimationFrame(() => {
-          rafId = null
-          const now = Date.now()
-          if (now - latestFlushAt < STREAM_FLUSH_MIN_INTERVAL) {
-            scheduleFlush()
-            return
+      const startScheduler = () => {
+        if (flushIntervalId !== null) return
+        flushIntervalId = setInterval(() => {
+          if (deltaBuffer.length > 0) {
+            flushDelta()
           }
-          flushDelta()
-        })
+        }, STREAM_FLUSH_MIN_INTERVAL)
+      }
+
+      const stopScheduler = () => {
+        if (flushIntervalId !== null) {
+          clearInterval(flushIntervalId)
+          flushIntervalId = null
+        }
+        // 最后如果还有残留一并刷出
+        while (deltaBuffer.length > 0 && assistant?.id) {
+          const nextContent = (assistant.content || '') + deltaBuffer
+          deltaBuffer = ''
+          patchAssistantMessage(assistant.id, { content: nextContent }, { updateConversationMeta: false })
+          assistant.content = nextContent
+        }
       }
 
       try {
+        // 启动消费者循环
+        startScheduler()
+
         // 5. 调用SSE流式接口，发送请求
         await streamChat({
           conversationId: currentConversationId,
@@ -183,12 +198,8 @@ export function useSSEChat() {
 
             // 流式传输完成
             if (event.done) {
-              if (rafId != null) {
-                cancelAnimationFrame(rafId)
-                rafId = null
-              }
+              stopScheduler()
 
-              flushDelta() // 刷新剩余缓冲
               setGenerating(false) // 关闭加载状态
               return
             }
@@ -200,14 +211,9 @@ export function useSSEChat() {
 
             // 格式化文本片段
             const deltaText = normalizeDeltaText(event.delta)
+            // 不再立即 flushDelta，全部堆入缓冲池由 setInterval 自动消费
             if (deltaText) {
-              deltaBuffer += deltaText // 加入缓冲池
-              // 首次返回文字，立即渲染；后续文字节流渲染
-              if (!assistant.content) {
-                flushDelta()
-              } else {
-                scheduleFlush()
-              }
+              deltaBuffer += deltaText
             }
 
             // 更新引用文献/上下文文档
@@ -225,22 +231,14 @@ export function useSSEChat() {
           },
           // 网络错误处理
           onError: () => {
-            if (rafId != null) {
-              cancelAnimationFrame(rafId)
-              rafId = null
-            }
-            flushDelta()
+            stopScheduler()
             setStreamError('网络异常，已中断生成')
             setGenerating(false)
           },
         })
       } catch (error) {
         // 清理定时器和缓冲
-        if (rafId != null) {
-          cancelAnimationFrame(rafId)
-          rafId = null
-        }
-        flushDelta()
+        stopScheduler()
 
         // 非手动中断的错误，展示错误提示
         if (error.name !== 'AbortError') {
