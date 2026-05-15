@@ -937,7 +937,7 @@ function normalizeHistoryMessages(messages = []) {
     }))
     .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
 }
-
+// 从数据库加载对话历史消息，返回格式化后的消息列表，供后续构建模型输入使用。
 async function loadConversationHistoryMessages({ username, conversationId }) {
   if (!messagesCollection) return []
   const safeUsername = String(username || '').trim()
@@ -952,7 +952,7 @@ async function loadConversationHistoryMessages({ username, conversationId }) {
 
   return normalizeHistoryMessages(list)
 }
-
+// 构建发送给模型的消息列表，包含系统提示、历史对话与当前用户输入，支持文本与图片混合输入。
 function buildUpstreamMessages({ historyMessages = [], userContent = '', images = [] }) {
   const safeUserContent = String(userContent || '').trim()
   const normalizedHistory = normalizeHistoryMessages(historyMessages)
@@ -986,7 +986,7 @@ function buildUpstreamMessages({ historyMessages = [], userContent = '', images 
     { role: 'user', content: finalUserMessageContent },
   ]
 }
-
+// 尝试解析 JSON，失败时返回 null，避免抛出异常干扰正常流程。
 function parseMaybeJSON(text = '') {
   try {
     return JSON.parse(text)
@@ -994,7 +994,7 @@ function parseMaybeJSON(text = '') {
     return null
   }
 }
-
+// 修复常见 mojibake 乱码，提升文本可读性评分，辅助多编码尝试选择最佳解码结果。
 function normalizeMojibake(text = '') {
   const mojibakePattern = /[ÃÂæåç¤¿]/
   if (!mojibakePattern.test(text)) return text
@@ -1597,7 +1597,7 @@ async function pipeOpenAICompatStream({
     clearTimeout(timeout)
   }
 }
-
+// 通用的 SSE JSON 流式管道函数，适用于上游接口符合约定格式但不完全兼容 OpenAI 的场景。
 async function pipeGenericSSEJSONStream({
   endpoint,
   conversationId,
@@ -2219,7 +2219,7 @@ app.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => 
   const file = await buildChatAttachmentFile({ file: req.file })
   res.json({ ok: true, file })
 })
-
+// ========== 聊天接口 ==========流式转发消息给前端
 app.post('/api/chat/stream', requireAuth, async (req, res) => {
   const username = String(req.auth?.username || '').trim()
   const {

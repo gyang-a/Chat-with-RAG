@@ -199,7 +199,8 @@ export function useSSEChat() {
             // 流式传输完成
             if (event.done) {
               stopScheduler()
-
+            // 流结束，用完整模式更新一次，确保侧边栏拿到最终的 lastPreview
+            patchAssistantMessage(assistant.id, {}, { updateConversationMeta: true })
               setGenerating(false) // 关闭加载状态
               return
             }

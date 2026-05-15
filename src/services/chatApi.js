@@ -67,7 +67,7 @@ export async function streamChat({
     throw new Error(messageText)
   }
 // 解析 SSE 流式响应，逐块触发 onEvent 回调，直到流结束或发生错误。
-  const reader = response.body.getReader()
+  const reader = response.body.getReader()//定义读取器，用于逐块读取 SSE 响应体数据
   // SSE 事件块格式示例：
   // data: {"delta":"Hello"}
   // data: {"delta":" world!"}

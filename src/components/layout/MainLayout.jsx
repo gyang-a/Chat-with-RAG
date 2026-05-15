@@ -92,9 +92,9 @@ export function MainLayout() {
     fetchHistorySnapshot()
       .then((snapshot) => {
         if (cancelled) return
-        applyRemoteHistorySnapshot(snapshot)
-        lastSavedSignatureRef.current = buildHistorySignature(snapshot)
-        hydratedOwnerRef.current = ownerUsername
+        applyRemoteHistorySnapshot(snapshot)// 更新 Zustand Store
+        lastSavedSignatureRef.current = buildHistorySignature(snapshot)// 同步历史快照签名，避免重复保存
+        hydratedOwnerRef.current = ownerUsername// 标记已完成历史注入
       })
       .catch(() => {
         if (cancelled) return

@@ -352,7 +352,7 @@ export const useChatStore = create(
               },
             }
           }
-
+          //更新会话预览与更新时间，确保新消息能正确反映在会话列表上。
           const assistantLast = [...nextList].reverse().find((msg) => msg.role === 'assistant')
           return {
             messagesByConversation: {
