@@ -63,8 +63,123 @@ function normalizeMathDelimiters(markdown = '') {
   return next
 }
 
+// 基于状态机和栈的标签补全，防止流式输出时标签未闭合导致的 DOM 闪烁
+function autoCloseMarkdownTags(text) {
+  if (!text) return text
+  
+  let stack = []
+  let inCodeBlock = false
+  let inMathBlock = false
+  
+  let i = 0
+  while (i < text.length) {
+    const char = text[i]
+    
+    // 1. 处理代码块 ```
+    if (text.slice(i, i + 3) === '```') {
+      inCodeBlock = !inCodeBlock
+      if (!inCodeBlock) {
+        // 退出代码块时，忽略内部收集的其它错乱标签
+        stack = stack.filter(s => s.type !== 'bold' && s.type !== 'italic' && s.type !== 'strike' && s.type !== 'inline-code')
+      }
+      i += 3
+      continue
+    }
+    
+    // 代码块内，不解析其它标签
+    if (inCodeBlock) {
+      i++
+      continue
+    }
+
+    // 处理块级公式 $$
+    if (text.slice(i, i + 2) === '$$') {
+      inMathBlock = !inMathBlock
+      i += 2
+      continue
+    }
+    
+    if (inMathBlock) {
+      i++
+      continue
+    }
+    
+    // 2. 处理粗体 **
+    if (text.slice(i, i + 2) === '**') {
+      if (stack[stack.length - 1]?.tag === '**') {
+        stack.pop()
+      } else {
+        stack.push({ tag: '**', type: 'bold' })
+      }
+      i += 2
+      continue
+    }
+    
+    // 3. 处理斜体 *
+    if (char === '*' && text[i + 1] !== '*') {
+      if (stack[stack.length - 1]?.tag === '*') {
+        stack.pop()
+      } else {
+        stack.push({ tag: '*', type: 'italic' })
+      }
+      i++
+      continue
+    }
+    
+    // 4. 处理删除线 ~~
+    if (text.slice(i, i + 2) === '~~') {
+      if (stack[stack.length - 1]?.tag === '~~') {
+        stack.pop()
+      } else {
+        stack.push({ tag: '~~', type: 'strike' })
+      }
+      i += 2
+      continue
+    }
+    
+    // 5. 处理行内代码 `
+    if (char === '`') {
+      if (stack[stack.length - 1]?.tag === '`') {
+        stack.pop()
+      } else {
+        stack.push({ tag: '`', type: 'inline-code' })
+      }
+      i++
+      continue
+    }
+    
+    i++
+  }
+  
+  let result = text
+  
+  // 必须优先闭合代码块和公式块，并加上换行
+  if (inCodeBlock) {
+    if (!result.endsWith('\n')) result += '\n'
+    result += '```'
+  }
+  if (inMathBlock) {
+    if (!result.endsWith('\n')) result += '\n'
+    result += '$$'
+  }
+  
+  // 依次补全栈中剩余的标签 (倒序从内到外闭合)
+  for (let j = stack.length - 1; j >= 0; j--) {
+    const tag = stack[j].tag
+    if (tag === '**') result += '**'
+    else if (tag === '*') result += '*'
+    else if (tag === '~~') result += '~~'
+    else if (tag === '`') result += '`'
+  }
+  
+  return result
+}
+
 export function MarkdownRenderer({ content }) {
-  const safeContent = normalizeMathDelimiters(normalizeMarkdownContent(content))
+  const rawText = normalizeMarkdownContent(content)
+  const mathNormalized = normalizeMathDelimiters(rawText)
+  const safeContent = autoCloseMarkdownTags(mathNormalized)
+  
   const hasMath = useMemo(() => MATH_MARKER_REGEX.test(safeContent), [safeContent])
   const [mathPlugins, setMathPlugins] = useState({ remarkMath: null, rehypeKatex: null })
 

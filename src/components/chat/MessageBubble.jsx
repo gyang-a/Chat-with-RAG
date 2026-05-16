@@ -107,17 +107,11 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
               当前回答: {retrievalLabel}
             </div>
           )}
-          {streaming ? (
-            <pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>
-              {normalizedContent}
-            </pre>
-          ) : (
-            <Suspense
-              fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
-            >
-              <MarkdownRenderer content={normalizedContent} />
-            </Suspense>
-          )}
+          <Suspense
+            fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
+          >
+            <MarkdownRenderer content={normalizedContent} />
+          </Suspense>
           
           {!streaming && message.refs && message.refs.length > 0 && (
             <div className='mt-3 space-y-1.5 border-t border-border pt-3'>

@@ -128,6 +128,7 @@ export function useSSEChat() {
       let deltaBuffer = ''
       // 定时器 ID
       let flushIntervalId = null
+      let rafId = null
 
       /**
        * 刷新缓冲：将缓存的文字定量截取更新到AI消息
@@ -142,13 +143,16 @@ export function useSSEChat() {
 
         const nextContent = (assistant.content || '') + nextChunk
 
-        // 更新全局状态，渲染文字
-        patchAssistantMessage(assistant.id, {
-          content: nextContent,
-        }, { updateConversationMeta: false })
-        
-        // 同步更新本地缓存的消息内容
-        assistant.content = nextContent
+        // 使用 requestAnimationFrame 将状态更新（渲染）对齐到浏览器的重绘周期
+        rafId = requestAnimationFrame(() => {
+          // 更新全局状态，渲染文字
+          patchAssistantMessage(assistant.id, {
+            content: nextContent,
+          }, { updateConversationMeta: false })
+          
+          // 同步更新本地缓存的消息内容
+          assistant.content = nextContent
+        })
       }
 
       /**
@@ -167,6 +171,10 @@ export function useSSEChat() {
         if (flushIntervalId !== null) {
           clearInterval(flushIntervalId)
           flushIntervalId = null
+        }
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId)
+          rafId = null
         }
 
         if (dropBuffer) {
