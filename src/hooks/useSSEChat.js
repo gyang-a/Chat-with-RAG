@@ -163,11 +163,17 @@ export function useSSEChat() {
         }, STREAM_FLUSH_MIN_INTERVAL)
       }
 
-      const stopScheduler = () => {
+      const stopScheduler = (dropBuffer = false) => {
         if (flushIntervalId !== null) {
           clearInterval(flushIntervalId)
           flushIntervalId = null
         }
+
+        if (dropBuffer) {
+          deltaBuffer = ''
+          return
+        }
+
         // 最后如果还有残留一并刷出
         while (deltaBuffer.length > 0 && assistant?.id) {
           const nextContent = (assistant.content || '') + deltaBuffer
@@ -238,11 +244,12 @@ export function useSSEChat() {
           },
         })
       } catch (error) {
-        // 清理定时器和缓冲
-        stopScheduler()
+        const isAbort = error.name === 'AbortError'
+        // 清理定时器和缓冲，手动中断时丢弃缓冲区防止继续渲染
+        stopScheduler(isAbort)
 
         // 非手动中断的错误，展示错误提示
-        if (error.name !== 'AbortError') {
+        if (!isAbort) {
           patchAssistantMessage(assistant.id, {
             content: assistant.content || '请求失败，请重试。',
           })

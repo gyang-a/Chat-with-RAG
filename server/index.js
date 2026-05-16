@@ -16,26 +16,36 @@ import { buildModelRegistry } from './modelRegistry.js'
 import { createRagService } from './ragService.js'
 import { performWebSearch } from './searchService.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const rootDir = path.resolve(__dirname, '..')
-const uploadsDir = path.resolve(rootDir, 'uploads')
+const __filename = fileURLToPath(import.meta.url)//获取当前文件的绝对路径
+const __dirname = path.dirname(__filename)//获取当前文件所在文件夹的绝对路径
+const rootDir = path.resolve(__dirname, '..')//获取项目根目录
+const uploadsDir = path.resolve(rootDir, 'uploads')//得到项目根目录下 uploads 文件夹的绝对路径
 // 头像单独放在 avatars 子目录，便于权限控制与后续清理策略。
 const avatarUploadsDir = path.resolve(uploadsDir, 'avatars')
 
 // 优先读取 .env.server；未命中时再回退 .env
 dotenv.config({ path: path.resolve(rootDir, '.env.server') })
 dotenv.config()
+// 去项目根目录找 .env 文件
+// 读取里面的所有键值对
+// 把它们全部加载到 process.env 里
+// 之后在代码里用 process.env.变量名 获取配置
 
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true })
 }
+// 1. fs.existsSync(uploadsDir)
+// fs = Node.js 自带的文件系统模块（操作文件 / 文件夹）
+// existsSync = 同步检查文件或文件夹是否存在
+// 如果 uploads 文件夹不存在…
+// 2. fs.mkdirSync(uploadsDir, { recursive: true })
+// mkdirSync = 同步创建文件夹
+// { recursive: true } = 自动创建多级目录
 
 if (!fs.existsSync(avatarUploadsDir)) {
   // 启动时确保头像目录存在，避免首次上传报路径不存在。
   fs.mkdirSync(avatarUploadsDir, { recursive: true })
 }
-
 const app = express()
 const port = Number(process.env.SERVER_PORT || 3000)
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 120000)
@@ -59,452 +69,22 @@ let usersCollection = null
 let conversationsCollection = null
 let messagesCollection = null
 let ragService = null
+//用来保存 MongoDB 数据库连接和 3 张数据表
 const modelRegistry = buildModelRegistry()
-
-function toOpenAICompatEndpoint(url = '') {
-  // 兼容“基地址”与“完整 /chat/completions 地址”两种输入。
-  const trimmed = String(url || '').trim().replace(/\/+$/, '')
-  if (!trimmed) return ''
-  if (trimmed.endsWith('/chat/completions')) return trimmed
-  return `${trimmed}/chat/completions`
-}
-
-function normalizeCustomModelName(value = '') {
-  const name = String(value || '').trim()
-  // 仅允许常见模型命名字符，避免注入与不可见字符污染。
-  if (!/^[A-Za-z0-9._:-]{1,80}$/.test(name)) return ''
-  return name
-}
-
-function normalizeUserCustomModels(rawList = []) {
-  if (!Array.isArray(rawList)) return []
-
-  const seen = new Set()
-  const list = []
-  for (const item of rawList) {
-    const name = normalizeCustomModelName(item?.name)
-    const apiKey = String(item?.apiKey || '').trim()
-    const endpoint = String(item?.endpoint || '').trim()
-    if (!name || !apiKey) continue
-    const uniqueKey = name.toLowerCase()
-    if (seen.has(uniqueKey)) continue
-    seen.add(uniqueKey)
-
-    list.push({
-      name,
-      apiKey,
-      endpoint,
-      updatedAt: Number(item?.updatedAt || Date.now()),
-      createdAt: Number(item?.createdAt || Date.now()),
-    })
-  }
-
-  return list
-}
-
-async function getUserCustomModels(username) {
-  const user = await getAuthUser(username)
-  return normalizeUserCustomModels(user?.customModels || [])
-}
-
-async function upsertUserCustomModel({ username, name, apiKey, endpoint }) {
-  if (!usersCollection) {
-    throw new Error('数据库未初始化')
-  }
-
-  const safeUsername = String(username || '').trim()
-  const safeName = normalizeCustomModelName(name)
-  const safeApiKey = String(apiKey || '').trim()
-  const safeEndpoint = String(endpoint || '').trim()
-  if (!safeUsername || !safeName || !safeApiKey) {
-    throw new Error('模型名称与 API Key 为必填')
-  }
-
-  const current = await getUserCustomModels(safeUsername)
-  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
-  const next = [...current]
-  const now = Date.now()
-
-  if (existsIndex >= 0) {
-    next[existsIndex] = {
-      ...next[existsIndex],
-      name: safeName,
-      apiKey: safeApiKey,
-      endpoint: safeEndpoint,
-      updatedAt: now,
-    }
-  } else {
-    if (next.length >= 30) {
-      throw new Error('自定义模型数量已达上限（30）')
-    }
-    next.push({
-      name: safeName,
-      apiKey: safeApiKey,
-      endpoint: safeEndpoint,
-      createdAt: now,
-      updatedAt: now,
-    })
-  }
-
-  await usersCollection.updateOne(
-    { username: safeUsername },
-    {
-      $set: {
-        customModels: next,
-      },
-    },
-  )
-
-  return {
-    name: safeName,
-    updated: existsIndex >= 0,
-  }
-}
-
-async function deleteUserCustomModel({ username, modelName }) {
-  if (!usersCollection) {
-    throw new Error('数据库未初始化')
-  }
-
-  const safeUsername = String(username || '').trim()
-  const safeName = normalizeCustomModelName(modelName)
-  if (!safeUsername || !safeName) {
-    throw new Error('模型名称不能为空')
-  }
-
-  const current = await getUserCustomModels(safeUsername)
-  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
-
-  await usersCollection.updateOne(
-    { username: safeUsername },
-    {
-      $set: {
-        customModels: next,
-      },
-    },
-  )
-}
-
-// ========== 自定义嵌入模型（Embedding Model）CRUD ==========
-
-function normalizeUserCustomEmbeddingModels(rawList = []) {
-  if (!Array.isArray(rawList)) return []
-
-  const seen = new Set()
-  const list = []
-  for (const item of rawList) {
-    const name = String(item?.name || '').trim()
-    const apiKey = String(item?.apiKey || '').trim()
-    const endpoint = String(item?.endpoint || '').trim()
-    if (!name || !endpoint) continue
-    const uniqueKey = name.toLowerCase()
-    if (seen.has(uniqueKey)) continue
-    seen.add(uniqueKey)
-
-    list.push({
-      name,
-      apiKey,
-      endpoint,
-      isDefault: Boolean(item?.isDefault),
-      updatedAt: Number(item?.updatedAt || Date.now()),
-      createdAt: Number(item?.createdAt || Date.now()),
-    })
-  }
-
-  return list
-}
-
-function normalizeEmbeddingSource(value = '') {
-  const source = String(value || 'auto').trim().toLowerCase()
-  if (source === 'custom') return 'custom'
-  if (source === 'global' || source === 'env') return 'global'
-  return 'auto'
-}
-
-function getGlobalEmbeddingConfig() {
-  const endpoint = String(process.env.EMBEDDING_API_URL || '').trim()
-  const model = String(process.env.EMBEDDING_MODEL || '').trim()
-  const apiKey = String(process.env.EMBEDDING_API_KEY || '').trim()
-  return {
-    endpoint,
-    model,
-    apiKey,
-    configured: Boolean(endpoint && model),
-  }
-}
-
-async function getUserEmbeddingSource(username) {
-  const user = await getAuthUser(username)
-  return normalizeEmbeddingSource(user?.embeddingModelSource)
-}
-
-async function setUserEmbeddingSource({ username, source }) {
-  if (!usersCollection) {
-    throw new Error('数据库未初始化')
-  }
-
-  const safeUsername = String(username || '').trim()
-  if (!safeUsername) {
-    throw new Error('缺少用户信息')
-  }
-
-  const safeSource = normalizeEmbeddingSource(source)
-  if (safeSource === 'custom') {
-    const list = await getUserCustomEmbeddingModels(safeUsername)
-    if (!Array.isArray(list) || list.length === 0) {
-      throw new Error('当前没有可用的自定义嵌入模型')
-    }
-  }
-
-  await usersCollection.updateOne(
-    { username: safeUsername },
-    {
-      $set: {
-        embeddingModelSource: safeSource,
-      },
-    },
-  )
-
-  return safeSource
-}
-
-async function resolveEmbeddingConfigForUser(username) {
-  const safeUsername = String(username || '').trim()
-  const selectedSource = safeUsername ? await getUserEmbeddingSource(safeUsername) : 'auto'
-  const userModels = safeUsername ? await getUserCustomEmbeddingModels(safeUsername) : []
-  const globalConfig = getGlobalEmbeddingConfig()
-  const defaultModel = userModels.find((item) => item.isDefault)
-  const firstModel = defaultModel || userModels[0] || null
-
-  if (selectedSource === 'custom') {
-    return {
-      selectedSource,
-      source: firstModel ? 'custom' : 'global',
-      configured: Boolean(firstModel?.endpoint && firstModel?.name),
-      endpoint: String(firstModel?.endpoint || ''),
-      model: String(firstModel?.name || ''),
-      apiKey: String(firstModel?.apiKey || ''),
-      globalConfigured: globalConfig.configured,
-      hasCustomModels: userModels.length > 0,
-    }
-  }
-
-  if (selectedSource === 'global') {
-    return {
-      selectedSource,
-      source: 'global',
-      configured: globalConfig.configured,
-      endpoint: globalConfig.endpoint,
-      model: globalConfig.model,
-      apiKey: globalConfig.apiKey,
-      globalConfigured: globalConfig.configured,
-      hasCustomModels: userModels.length > 0,
-    }
-  }
-
-  if (firstModel) {
-    return {
-      selectedSource,
-      source: 'custom',
-      configured: Boolean(firstModel.endpoint && firstModel.name),
-      endpoint: String(firstModel.endpoint || ''),
-      model: String(firstModel.name || ''),
-      apiKey: String(firstModel.apiKey || ''),
-      globalConfigured: globalConfig.configured,
-      hasCustomModels: userModels.length > 0,
-    }
-  }
-
-  return {
-    selectedSource,
-    source: 'global',
-    configured: globalConfig.configured,
-    endpoint: globalConfig.endpoint,
-    model: globalConfig.model,
-    apiKey: globalConfig.apiKey,
-    globalConfigured: globalConfig.configured,
-    hasCustomModels: false,
-  }
-}
-
-async function getEmbeddingRuntimeConfigForUser(username) {
-  const config = await resolveEmbeddingConfigForUser(username)
-  return {
-    source: config.source,
-    apiUrl: config.endpoint,
-    apiKey: config.apiKey,
-    model: config.model,
-    enabled: Boolean(config.endpoint && config.model),
-  }
-}
-
-async function getUserCustomEmbeddingModels(username) {
-  const user = await getAuthUser(username)
-  return normalizeUserCustomEmbeddingModels(user?.customEmbeddingModels || [])
-}
-
-async function upsertUserCustomEmbeddingModel({ username, name, apiKey, endpoint, isDefault = false }) {
-  if (!usersCollection) {
-    throw new Error('数据库未初始化')
-  }
-
-  const safeUsername = String(username || '').trim()
-  const safeName = String(name || '').trim()
-  const safeApiKey = String(apiKey || '').trim()
-  const safeEndpoint = String(endpoint || '').trim()
-  if (!safeUsername || !safeName || !safeEndpoint) {
-    throw new Error('模型名称和接口地址为必填')
-  }
-
-  const current = await getUserCustomEmbeddingModels(safeUsername)
-  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
-  const next = [...current]
-  const now = Date.now()
-
-  // 如果设为默认，先清除其他默认标记
-  if (isDefault) {
-    for (const item of next) {
-      item.isDefault = false
-    }
-  }
-
-  if (existsIndex >= 0) {
-    next[existsIndex] = {
-      ...next[existsIndex],
-      name: safeName,
-      apiKey: safeApiKey,
-      endpoint: safeEndpoint,
-      isDefault,
-      updatedAt: now,
-    }
-  } else {
-    if (next.length >= 10) {
-      throw new Error('自定义嵌入模型数量已达上限（10）')
-    }
-    // 如果是第一个模型，自动设为默认
-    const autoDefault = next.length === 0 ? true : isDefault
-    next.push({
-      name: safeName,
-      apiKey: safeApiKey,
-      endpoint: safeEndpoint,
-      isDefault: autoDefault,
-      createdAt: now,
-      updatedAt: now,
-    })
-  }
-
-  await usersCollection.updateOne(
-    { username: safeUsername },
-    {
-      $set: {
-        customEmbeddingModels: next,
-        embeddingModelSource: 'custom',
-      },
-    },
-  )
-
-  return {
-    name: safeName,
-    updated: existsIndex >= 0,
-  }
-}
-
-async function deleteUserCustomEmbeddingModel({ username, modelName }) {
-  if (!usersCollection) {
-    throw new Error('数据库未初始化')
-  }
-
-  const safeUsername = String(username || '').trim()
-  const safeName = String(modelName || '').trim()
-  if (!safeUsername || !safeName) {
-    throw new Error('模型名称不能为空')
-  }
-
-  const current = await getUserCustomEmbeddingModels(safeUsername)
-  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
-
-  const nextPatch = {
-    customEmbeddingModels: next,
-  }
-  if (next.length === 0) {
-    nextPatch.embeddingModelSource = 'auto'
-  }
-
-  await usersCollection.updateOne(
-    { username: safeUsername },
-    {
-      $set: nextPatch,
-    },
-  )
-}
-
-async function getAvailableModelsForUser(username) {
-  const customModels = await getUserCustomModels(username)
-  const names = [...modelRegistry.allModels]
-  const builtInLower = new Set(names.map((item) => String(item || '').toLowerCase()))
-
-  for (const item of customModels) {
-    const lower = item.name.toLowerCase()
-    if (builtInLower.has(lower)) continue
-    names.push(item.name)
-  }
-
-  return {
-    models: names,
-    defaultModel: modelRegistry.defaultModel || names[0] || '',
-    customModels: customModels.map((item) => ({
-      name: item.name,
-      updatedAt: item.updatedAt,
-      createdAt: item.createdAt,
-    })),
-  }
-}
-
-async function resolveSelectionForUser(username, inputModel) {
-  const requestedModel = String(inputModel || '').trim()
-  if (!requestedModel) {
-    return modelRegistry.resolveSelection(requestedModel)
-  }
-
-  const customModels = await getUserCustomModels(username)
-  const hit = customModels.find((item) => item.name.toLowerCase() === requestedModel.toLowerCase())
-  if (hit) {
-    return {
-      provider: {
-        id: `user-model:${requestedModel}`,
-        mode: 'openai',
-        endpoint: toOpenAICompatEndpoint(hit.endpoint),
-        apiKey: hit.apiKey,
-        authMode: 'bearer',
-        requestModel: hit.name,
-        defaultModel: hit.name,
-        models: [hit.name],
-      },
-      model: hit.name,
-    }
-  }
-
-  return modelRegistry.resolveSelection(requestedModel)
-}
-
-function toBeijingISOString(input = Date.now()) {
-  const utcMs = input instanceof Date ? input.getTime() : Number(input)
-  const beijingMs = utcMs + 8 * 60 * 60 * 1000
-  return new Date(beijingMs).toISOString().replace('Z', '+08:00')
-}
-
+// 初始化 MongoDB 连接，创建必要的索引，并确保默认用户存在。
 async function initMongoDB() {
-  const client = new MongoClient(mongodbUri)
-  await client.connect()
-  const db = client.db(mongodbDbName)
-  const users = db.collection('users')
-  const conversations = db.collection('conversations')
-  const messages = db.collection('messages')
-
+  const client = new MongoClient(mongodbUri)//创建一个新的 MongoClient 实例，连接到指定的 MongoDB URI
+  await client.connect()//连接到 MongoDB 数据库
+  const db = client.db(mongodbDbName)//获取指定名称的数据库实例，没有则创建
+  const users = db.collection('users')//获取 users 集合实例
+  const conversations = db.collection('conversations')//获取 conversations 集合实例
+  const messages = db.collection('messages')//获取 messages 集合实例
+//创建索引：确保 username 唯一，优化查询性能
   await users.createIndex({ username: 1 }, { unique: true })
   await conversations.createIndex({ username: 1, conversationId: 1 }, { unique: true })
   await conversations.createIndex({ username: 1, updatedAt: -1 })
   await messages.createIndex({ username: 1, conversationId: 1, createdAt: 1 })
+  // 确保默认用户存在，使用 $setOnInsert 避免覆盖已有用户数据。
   await users.updateOne(
     { username: authUsername },
     {
@@ -516,7 +96,7 @@ async function initMongoDB() {
         createdAt: toBeijingISOString(),
       },
     },
-    { upsert: true },
+    { upsert: true },//如果没有找到匹配的用户，就创建一个新的用户文档，包含默认的用户名、密码、头像 URL、嵌入模型来源和创建时间。
   )
 
   // 补齐历史用户缺失的头像字段，避免前端读取时出现 undefined。
@@ -598,13 +178,433 @@ async function initMongoDB() {
   await ragService.ensureIndexes()
   mongodbClient = client
 }
-
+// 兼容“基地址”与“完整 /chat/completions 地址”两种输入。
+function toOpenAICompatEndpoint(url = '') {
+  const trimmed = String(url || '').trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  if (trimmed.endsWith('/chat/completions')) return trimmed
+  return `${trimmed}/chat/completions`
+}
+//标准化模型名
+function normalizeCustomModelName(value = '') {
+  const name = String(value || '').trim()
+  // 仅允许常见模型命名字符，避免注入与不可见字符污染。
+  if (!/^[A-Za-z0-9._:-]{1,80}$/.test(name)) return ''
+  return name
+}
+//查数据库，获取用户
 async function getAuthUser(username) {
   // 按用户名查询用户文档，统一入口便于后续加缓存或投影
   if (!usersCollection) return null
   const safeUsername = String(username || '').trim()
   if (!safeUsername) return null
   return usersCollection.findOne({ username: safeUsername })
+}
+//模型列表的清洗工厂 + 去重工厂
+function normalizeUserCustomModels(rawList = []) {
+  if (!Array.isArray(rawList)) return []
+  const seen = new Set()
+  const list = []
+  for (const item of rawList) {
+    const name = normalizeCustomModelName(item?.name)
+    const apiKey = String(item?.apiKey || '').trim()
+    const endpoint = String(item?.endpoint || '').trim()
+    if (!name || !apiKey) continue
+    const uniqueKey = name.toLowerCase()
+    if (seen.has(uniqueKey)) continue
+    seen.add(uniqueKey)
+
+    list.push({
+      name,
+      apiKey,
+      endpoint,
+      updatedAt: Number(item?.updatedAt || Date.now()),
+      createdAt: Number(item?.createdAt || Date.now()),
+    })
+  }
+
+  return list
+}
+//获取用户模型列表
+async function getUserCustomModels(username) {
+  const user = await getAuthUser(username)
+  return normalizeUserCustomModels(user?.customModels || [])
+}
+//添加模型名的时候，先去查一下有没有这个名，如果有，就修改，没有就增加，然后findIndex如果没找到就返回-1
+async function upsertUserCustomModel({ username, name, apiKey, endpoint }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = normalizeCustomModelName(name)
+  const safeApiKey = String(apiKey || '').trim()
+  const safeEndpoint = String(endpoint || '').trim()
+  if (!safeUsername || !safeName || !safeApiKey) {
+    throw new Error('模型名称与 API Key 为必填')
+  }
+
+  const current = await getUserCustomModels(safeUsername)
+  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
+  const next = [...current]
+  const now = Date.now()
+
+  if (existsIndex >= 0) {
+    next[existsIndex] = {
+      ...next[existsIndex],
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      updatedAt: now,
+    }
+  } else {
+    if (next.length >= 30) {
+      throw new Error('自定义模型数量已达上限（30）')
+    }
+    next.push({
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customModels: next,
+      },
+    },
+  )
+
+  return {
+    name: safeName,
+    updated: existsIndex >= 0,
+  }
+}
+//全量覆盖 = 等效删除某个模型，mongodb不支持删除某个消息
+async function deleteUserCustomModel({ username, modelName }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = normalizeCustomModelName(modelName)
+  if (!safeUsername || !safeName) {
+    throw new Error('模型名称不能为空')
+  }
+
+  const current = await getUserCustomModels(safeUsername)
+  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customModels: next,
+      },
+    },
+  )
+}
+
+// ========== 自定义嵌入模型（Embedding Model）CRUD ==========
+//标准化嵌入模型
+function normalizeUserCustomEmbeddingModels(rawList = []) {
+  if (!Array.isArray(rawList)) return []
+
+  const seen = new Set()
+  const list = []
+  for (const item of rawList) {
+    const name = String(item?.name || '').trim()
+    const apiKey = String(item?.apiKey || '').trim()
+    const endpoint = String(item?.endpoint || '').trim()
+    if (!name || !endpoint) continue
+    const uniqueKey = name.toLowerCase()
+    if (seen.has(uniqueKey)) continue
+    seen.add(uniqueKey)
+
+    list.push({
+      name,
+      apiKey,
+      endpoint,
+      isDefault: Boolean(item?.isDefault),
+      updatedAt: Number(item?.updatedAt || Date.now()),
+      createdAt: Number(item?.createdAt || Date.now()),
+    })
+  }
+
+  return list
+}
+//区分用户模型还是系统模型
+function normalizeEmbeddingSource(value = '') {
+  const source = String(value || 'auto').trim().toLowerCase()
+  if (source === 'custom') return 'custom'
+  if (source === 'global' || source === 'env') return 'global'
+  return 'auto'
+}
+//拿到全局嵌入模型
+function getGlobalEmbeddingConfig() {
+  const endpoint = String(process.env.EMBEDDING_API_URL || '').trim()
+  const model = String(process.env.EMBEDDING_MODEL || '').trim()
+  const apiKey = String(process.env.EMBEDDING_API_KEY || '').trim()
+  return {
+    endpoint,
+    model,
+    apiKey,
+    configured: Boolean(endpoint && model),
+  }
+}
+//获取用户嵌入模型
+async function getUserEmbeddingSource(username) {
+  const user = await getAuthUser(username)
+  return normalizeEmbeddingSource(user?.embeddingModelSource)
+}
+//设置用户嵌入模型来源
+async function setUserEmbeddingSource({ username, source }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+  const safeUsername = String(username || '').trim()
+  if (!safeUsername) {
+    throw new Error('缺少用户信息')
+  }
+  const safeSource = normalizeEmbeddingSource(source)
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        embeddingModelSource: safeSource,
+      },
+    },
+  )
+  return safeSource
+}
+//选择用户嵌入模型
+async function resolveEmbeddingConfigForUser(username) {
+  const safeUsername = String(username || '').trim()
+  const selectedSource = safeUsername ? await getUserEmbeddingSource(safeUsername) : 'auto'
+  const userModels = safeUsername ? await getUserCustomEmbeddingModels(safeUsername) : []
+  const globalConfig = getGlobalEmbeddingConfig()
+  const defaultModel = userModels.find((item) => item.isDefault)
+  const firstModel = defaultModel || userModels[0] || null
+
+  if (selectedSource === 'custom') {
+    return {
+      selectedSource,
+      source: firstModel ? 'custom' : 'global',
+      configured: Boolean(firstModel?.endpoint && firstModel?.name),
+      endpoint: String(firstModel?.endpoint || ''),
+      model: String(firstModel?.name || ''),
+      apiKey: String(firstModel?.apiKey || ''),
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  if (selectedSource === 'global') {
+    return {
+      selectedSource,
+      source: 'global',
+      configured: globalConfig.configured,
+      endpoint: globalConfig.endpoint,
+      model: globalConfig.model,
+      apiKey: globalConfig.apiKey,
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  if (firstModel) {
+    return {
+      selectedSource,
+      source: 'custom',
+      configured: Boolean(firstModel.endpoint && firstModel.name),
+      endpoint: String(firstModel.endpoint || ''),
+      model: String(firstModel.name || ''),
+      apiKey: String(firstModel.apiKey || ''),
+      globalConfigured: globalConfig.configured,
+      hasCustomModels: userModels.length > 0,
+    }
+  }
+
+  return {
+    selectedSource,
+    source: 'global',
+    configured: globalConfig.configured,
+    endpoint: globalConfig.endpoint,
+    model: globalConfig.model,
+    apiKey: globalConfig.apiKey,
+    globalConfigured: globalConfig.configured,
+    hasCustomModels: false,
+  }
+}
+// 获取最终用于运行时调用嵌入接口的配置，供 RAG 模块使用。
+async function getEmbeddingRuntimeConfigForUser(username) {
+  const config = await resolveEmbeddingConfigForUser(username)
+  return {
+    source: config.source,
+    apiUrl: config.endpoint,
+    apiKey: config.apiKey,
+    model: config.model,
+    enabled: Boolean(config.endpoint && config.model),
+  }
+}
+//获取用户自定义嵌入模型列表
+async function getUserCustomEmbeddingModels(username) {
+  const user = await getAuthUser(username)
+  return normalizeUserCustomEmbeddingModels(user?.customEmbeddingModels || [])
+}
+//添加或更新用户自定义嵌入模型，如果 isDefault 为 true，则会把该模型设为默认并清除其他模型的默认标记。
+async function upsertUserCustomEmbeddingModel({ username, name, apiKey, endpoint, isDefault = false }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = String(name || '').trim()
+  const safeApiKey = String(apiKey || '').trim()
+  const safeEndpoint = String(endpoint || '').trim()
+  if (!safeUsername || !safeName || !safeEndpoint) {
+    throw new Error('模型名称和接口地址为必填')
+  }
+
+  const current = await getUserCustomEmbeddingModels(safeUsername)
+  const existsIndex = current.findIndex((item) => item.name.toLowerCase() === safeName.toLowerCase())
+  const next = [...current]
+  const now = Date.now()
+
+  // 如果设为默认，先清除其他默认标记
+  if (isDefault) {
+    for (const item of next) {
+      item.isDefault = false
+    }
+  }
+
+  if (existsIndex >= 0) {
+    next[existsIndex] = {
+      ...next[existsIndex],
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      isDefault,
+      updatedAt: now,
+    }
+  } else {
+    if (next.length >= 10) {
+      throw new Error('自定义嵌入模型数量已达上限（10）')
+    }
+    // 如果是第一个模型，自动设为默认
+    const autoDefault = next.length === 0 ? true : isDefault
+    next.push({
+      name: safeName,
+      apiKey: safeApiKey,
+      endpoint: safeEndpoint,
+      isDefault: autoDefault,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: {
+        customEmbeddingModels: next,
+        embeddingModelSource: 'custom',
+      },
+    },
+  )
+
+  return {
+    name: safeName,
+    updated: existsIndex >= 0,
+  }
+}
+// 只能全量覆盖式删除用户自定义嵌入模型，mongodb 不支持数组内单项删除。
+async function deleteUserCustomEmbeddingModel({ username, modelName }) {
+  if (!usersCollection) {
+    throw new Error('数据库未初始化')
+  }
+
+  const safeUsername = String(username || '').trim()
+  const safeName = String(modelName || '').trim()
+  if (!safeUsername || !safeName) {
+    throw new Error('模型名称不能为空')
+  }
+
+  const current = await getUserCustomEmbeddingModels(safeUsername)
+  const next = current.filter((item) => item.name.toLowerCase() !== safeName.toLowerCase())
+
+  const nextPatch = {
+    customEmbeddingModels: next,
+  }
+  if (next.length === 0) {
+    nextPatch.embeddingModelSource = 'auto'
+  }
+
+  await usersCollection.updateOne(
+    { username: safeUsername },
+    {
+      $set: nextPatch,
+    },
+  )
+}
+//获取用户可用模型列表
+async function getAvailableModelsForUser(username) {
+  const customModels = await getUserCustomModels(username)
+  const names = [...modelRegistry.allModels]
+  const builtInLower = new Set(names.map((item) => String(item || '').toLowerCase()))
+
+  for (const item of customModels) {
+    const lower = item.name.toLowerCase()
+    if (builtInLower.has(lower)) continue
+    names.push(item.name)
+  }
+
+  return {
+    models: names,
+    defaultModel: modelRegistry.defaultModel || names[0] || '',
+    customModels: customModels.map((item) => ({
+      name: item.name,
+      updatedAt: item.updatedAt,
+      createdAt: item.createdAt,
+    })),
+  }
+}
+//用户选了一个模型名字，我帮你找到它到底是：自定义模型 / 系统内置模型，并返回对应的请求配置。
+async function resolveSelectionForUser(username, inputModel) {
+  const requestedModel = String(inputModel || '').trim()
+  if (!requestedModel) {
+    return modelRegistry.resolveSelection(requestedModel)
+  }
+
+  const customModels = await getUserCustomModels(username)
+  const hit = customModels.find((item) => item.name.toLowerCase() === requestedModel.toLowerCase())
+  if (hit) {
+    return {
+      provider: {
+        id: `user-model:${requestedModel}`,
+        mode: 'openai',
+        endpoint: toOpenAICompatEndpoint(hit.endpoint),
+        apiKey: hit.apiKey,
+        authMode: 'bearer',
+        requestModel: hit.name,
+        defaultModel: hit.name,
+        models: [hit.name],
+      },
+      model: hit.name,
+    }
+  }
+
+  return modelRegistry.resolveSelection(requestedModel)
+}
+//转化为北京时间
+function toBeijingISOString(input = Date.now()) {
+  const utcMs = input instanceof Date ? input.getTime() : Number(input)
+  const beijingMs = utcMs + 8 * 60 * 60 * 1000
+  return new Date(beijingMs).toISOString().replace('Z', '+08:00')
 }
 
 async function createAuthUser(username, password) {
@@ -688,7 +688,7 @@ function normalizeMessagesSnapshot(messagesByConversation = {}) {
 
   return next
 }
-
+//查询某用户的所有对话，去掉多余字段，置顶的排前面、最近活跃的排前面，返回干净数组，供前端渲染
 async function loadHistorySnapshot(username) {
   if (!conversationsCollection || !messagesCollection) {
     throw new Error('数据库未初始化')
@@ -738,16 +738,15 @@ async function loadHistorySnapshot(username) {
     messagesByConversation,
   }
 }
-
+//将前端传来的对话列表和消息列表进行清洗，去掉多余字段，保持格式统一，然后全量覆盖到数据库里，供下次加载时使用
 async function saveHistorySnapshot(username, payload = {}) {
   if (!conversationsCollection || !messagesCollection) {
     throw new Error('数据库未初始化')
   }
-
   const conversations = normalizeConversationSnapshot(payload.conversations || [])
   const messagesByConversation = normalizeMessagesSnapshot(payload.messagesByConversation || {})
   const conversationIds = conversations.map((item) => item.id)
-
+//删除前端传来的 conversationIds 以外的对话和消息，保持数据库与前端一致，避免垃圾数据积累；如果前端没传 conversationIds，就删除全部历史记录，保持数据库干净。
   if (conversationIds.length > 0) {
     await conversationsCollection.deleteMany({
       username,
@@ -762,7 +761,9 @@ async function saveHistorySnapshot(username, payload = {}) {
     await messagesCollection.deleteMany({ username })
     return
   }
-
+//对话表：像编辑用户资料，改哪个字段更新哪个
+//消息表：像保存整个聊天记录文件，旧文件删了，新文件整个存进去
+//把多个数据库操作打包在一起，一次性发送执行，减少网络往返。
   await conversationsCollection.bulkWrite(
     conversations.map((item) => ({
       updateOne: {
@@ -806,13 +807,14 @@ async function saveHistorySnapshot(username, payload = {}) {
     await messagesCollection.insertMany(flattenedMessages, { ordered: false })
   }
 }
-
+//使用跨域中间件
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
     credentials: true,
   }),
 )
+//配置压缩中间件
 app.use(
   compression({
     filter: (req, res) => {
@@ -821,7 +823,9 @@ app.use(
     },
   }),
 )
+//解析客户端发来的 JSON 格式请求体，并把大小限制在 2MB。
 app.use(express.json({ limit: '2mb' }))
+//把 uploadsDir 目录下的文件以静态资源形式暴露，通过 URL 直接访问。
 app.use('/uploads', express.static(uploadsDir))
 
 const allowedMime = new Set([
@@ -836,7 +840,7 @@ const allowedMime = new Set([
   'image/gif',
 ])
 const allowedExt = new Set(['.pdf', '.txt', '.md', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'])
-
+//修复文件上传时中文文件名乱码问题
 function decodeUploadFileName(name = '') {
   try {
     // 修复部分 multipart 实现把 UTF-8 文件名按 latin1 解码导致的乱码
@@ -851,7 +855,7 @@ function decodeUploadFileName(name = '') {
     return name
   }
 }
-
+//multer 的磁盘存储配置，决定上传的文件存哪里、叫什么名
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadsDir),
   filename: (_, file, cb) => {
@@ -859,7 +863,7 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`)
   },
 })
-
+//上传中间件配置，限制文件大小，校验 MIME 类型和文件后缀，确保只接受安全的文件类型，避免恶意文件上传风险。
 const upload = multer({
   storage,
   limits: {
@@ -905,15 +909,15 @@ const avatarUpload = multer({
     cb(new Error('仅支持 JPG/PNG/WEBP/GIF 图片'))
   },
 })
-
+// 发送 SSE 格式数据，保持与 OpenAI 官方接口一致，方便前端统一处理流式响应。
 function sendSSE(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
-
+//消息发完标志
 function sendSSEDone(res) {
   res.write('data: [DONE]\n\n')
 }
-
+//转义 HTML 特殊字符，防止 XSS 注入和显示问题，确保用户输入安全地呈现。
 function escapeHtml(value = '') {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -922,11 +926,11 @@ function escapeHtml(value = '') {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
-
-function splitSafeChunks(text = '', size = 6) {
+//切块函数，.匹配任意单个字符
+function splitSafeChunks(text = '', size = 4) {
   return text.match(new RegExp(`.{1,${size}}`, 'g')) || []
 }
-
+// 对历史消息进行清洗和格式化，确保角色和内容字段规范，过滤掉无效或不完整的消息，保持输入数据质量。
 function normalizeHistoryMessages(messages = []) {
   if (!Array.isArray(messages)) return []
 
@@ -1005,7 +1009,7 @@ function normalizeMojibake(text = '') {
     return text
   }
 }
-
+//文本可读性评分函数
 function scoreReadableText(text = '') {
   if (!text) return -1
   const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length
@@ -1087,7 +1091,7 @@ function readExtraHeaders() {
   const parsed = parseMaybeJSON(raw)
   return parsed && typeof parsed === 'object' ? parsed : {}
 }
-
+//base64编码，URL安全的，去掉=号，+换-，/换_，适合放在 JWT 里当 payload 和 signature。
 function base64UrlEncode(input) {
   const raw = typeof input === 'string' ? Buffer.from(input) : input
   return raw
@@ -1096,18 +1100,19 @@ function base64UrlEncode(input) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
 }
-
+//base64解码
 function base64UrlDecode(input = '') {
   if (!input) return ''
   const padded = `${input}`.replace(/-/g, '+').replace(/_/g, '/')
   const padLength = (4 - (padded.length % 4)) % 4
   return Buffer.from(`${padded}${'='.repeat(padLength)}`, 'base64').toString('utf8')
 }
-
+//生成签名
 function signAuthPayload(payloadSegment) {
   return base64UrlEncode(crypto.createHmac('sha256', authSecret).update(payloadSegment).digest())
 }
-
+//签发一个包含用户名和过期时间的 JWT 格式 Token，供前端登录后使用，后续请求携带以验证身份和权限。
+//生成了一个字节流的签名然后转成base64，和base64的身份信息拼接生成token
 function issueAuthToken(username) {
   const payload = {
     username,
@@ -1118,20 +1123,20 @@ function issueAuthToken(username) {
   const signature = signAuthPayload(payloadSegment)
   return `${payloadSegment}.${signature}`
 }
-
+//保证token的格式正确，签名合法，未过期，包含用户名等必要信息，返回解析后的有效载荷供后续使用。
 function verifyAuthToken(token = '') {
   const [payloadSegment, signature] = String(token || '').split('.')
   if (!payloadSegment || !signature) {
     return { ok: false, message: 'Token 格式非法' }
   }
-
+// 验证签名，确保 Token 未被篡改。
   const expectedSign = signAuthPayload(payloadSegment)
   if (expectedSign !== signature) {
     return { ok: false, message: 'Token 签名无效' }
   }
 
-  const payloadText = base64UrlDecode(payloadSegment)
-  const payload = parseMaybeJSON(payloadText)
+  const payloadText = base64UrlDecode(payloadSegment)//解码出原始的 JSON 字符串
+  const payload = parseMaybeJSON(payloadText)//解析成对象
   if (!payload || typeof payload !== 'object') {
     return { ok: false, message: 'Token 内容非法' }
   }
@@ -1149,14 +1154,27 @@ function verifyAuthToken(token = '') {
     username: String(payload.username).trim(),
     exp: Number(payload.exp),
   }
+//   Token 字符串
+//     ↓
+// ① 拆分成 payload 和 signature
+//     ↓
+// ② 验证签名（防篡改）
+//     ↓
+// ③ 解码 payload
+//     ↓
+// ④ 检查过期时间
+//     ↓
+// ⑤ 检查用户名
+//     ↓
+// 返回 { ok: true, username, exp }
 }
-
+//从 HTTP 请求头中提取 Bearer Token ，拿到jwt供后续验证身份使用。
 function resolveBearerToken(req) {
   const raw = String(req.headers?.authorization || '')
   if (!raw.toLowerCase().startsWith('bearer ')) return ''
   return raw.slice(7).trim()
 }
-
+//鉴权中间件，保护需要登录访问的接口，验证请求携带的 Token 是否有效，解析出用户名供后续接口使用。
 function requireAuth(req, res, next) {
   const token = resolveBearerToken(req)
   if (!token) {
@@ -1176,7 +1194,8 @@ function requireAuth(req, res, next) {
   }
   next()
 }
-
+//服务于页面访问的中间件，点击链接，浏览器发请求，因此无法携带请求头
+//access_token是前端在生成「预览链接」时，手动把当前登录的 token 拼到 URL 里的！
 function requirePreviewAuth(req, res, next) {
   // 预览页支持 query token，解决新标签页无法附带 Authorization 头的问题。
   const queryToken = String(req.query?.access_token || '').trim()
@@ -1621,7 +1640,7 @@ async function pipeGenericSSEJSONStream({
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), upstreamTimeoutMs)
   signal?.addEventListener('abort', () => controller.abort(), { once: true })
-
+//通用转发器，转发消息给上游
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -1644,8 +1663,8 @@ async function pipeGenericSSEJSONStream({
       return
     }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
+    const reader = response.body.getReader()//读取器
+    const decoder = new TextDecoder('utf-8')//解码器
     let buffer = ''
 
     while (true) {
@@ -1671,9 +1690,9 @@ async function pipeGenericSSEJSONStream({
 
           const payload = parseMaybeJSON(text)
           if (payload) {
-            sendSSE(res, payload)
+            sendSSE(res, payload)//如果是JSON就发JSON
           } else {
-            sendSSE(res, { delta: text })
+            sendSSE(res, { delta: text })//非JSON,包一层
           }
         }
       }
@@ -1758,7 +1777,7 @@ app.post('/api/auth/register', async (req, res) => {
     expiresAt: Date.now() + authTokenTtlMs,
   })
 })
-
+//token合法不代表用户资料一定存在，可能用户被管理员删除了，所以这里再查一次数据库，确保用户存在且能拿到最新的头像地址等信息。
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   // 当前登录用户资料查询（用于前端刷新头像/昵称等信息）。
   const username = String(req.auth?.username || '').trim()
@@ -1773,14 +1792,12 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     user: buildAuthUserPayload(user),
   })
 })
-
+// 头像上传成功后写入用户资料，并清理旧头像文件。
 app.post('/api/auth/avatar', requireAuth, avatarUpload.single('avatar'), async (req, res) => {
-  // 头像上传成功后写入用户资料，并清理旧头像文件。
   if (!req.file) {
     res.status(400).json({ message: '缺少头像文件' })
     return
   }
-
   const username = String(req.auth?.username || '').trim()
   const user = await getAuthUser(username)
   if (!user) {
@@ -2393,7 +2410,7 @@ app.use((error, _req, res, _next) => {
 async function bootstrap() {
   await initMongoDB()
   app.listen(port, () => {
-    console.log(`[backend] listening on http://localhost:${port}`)
+    console.log(`服务启动在： http://localhost:${port}`)
   })
 }
 
