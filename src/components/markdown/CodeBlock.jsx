@@ -1,6 +1,6 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\components\markdown\CodeBlock.jsx
-import { Children, isValidElement, useMemo, useState } from 'react'
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -56,6 +56,9 @@ const LANGUAGE_ALIAS = {
   cs: 'csharp',
 }
 
+const STREAM_HIGHLIGHT_DELAY = 700
+const STREAM_HIGHLIGHT_MAX_CHARS = 60000
+
 function flattenNodeText(node) {
   if (node == null) return ''
   if (typeof node === 'string') return node
@@ -71,9 +74,13 @@ function flattenNodeText(node) {
   return ''
 }
 
-export function CodeBlock({ inline, className, children = '' }) {
+export function CodeBlock({ inline, className, children = '', streaming = false }) {
   const darkMode = useUIStore((s) => s.darkMode)
   const [copied, setCopied] = useState(false)
+  const [streamHighlightedText, setStreamHighlightedText] = useState('')
+  const latestTextRef = useRef('')
+  const highlightTimerRef = useRef(null)
+  const pendingSnapshotRef = useRef('')
 
   const language = useMemo(() => {
     // 兼容 js、tsx、c++、objective-c 等语言标识
@@ -87,9 +94,53 @@ export function CodeBlock({ inline, className, children = '' }) {
   // 部分版本的 react-markdown 不稳定传递 inline，这里做兜底识别
   const isBlockCode = inline === false || /language-/.test(className || '') || text.includes('\n')
 
+  useEffect(() => {
+    latestTextRef.current = text
+  }, [text])
+
+  useEffect(() => {
+    if (!streaming) {
+      if (highlightTimerRef.current) {
+        clearInterval(highlightTimerRef.current)
+        highlightTimerRef.current = null
+      }
+      return undefined
+    }
+
+    if (highlightTimerRef.current) return undefined
+
+    pendingSnapshotRef.current = text.length > STREAM_HIGHLIGHT_MAX_CHARS ? '' : text
+    highlightTimerRef.current = setInterval(() => {
+      setStreamHighlightedText(pendingSnapshotRef.current)
+      pendingSnapshotRef.current =
+        latestTextRef.current.length > STREAM_HIGHLIGHT_MAX_CHARS ? '' : latestTextRef.current
+    }, STREAM_HIGHLIGHT_DELAY)
+
+    return () => {
+      if (!streaming && highlightTimerRef.current) {
+        clearInterval(highlightTimerRef.current)
+        highlightTimerRef.current = null
+      }
+    }
+  }, [streaming, text])
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current) {
+      clearInterval(highlightTimerRef.current)
+      highlightTimerRef.current = null
+    }
+  }, [])
+
   if (!isBlockCode) {
     return <code className='rounded bg-muted px-1.5 py-0.5 text-[13px]'>{text}</code>
   }
+
+  const streamHighlightBoundary =
+    streamHighlightedText === text ? streamHighlightedText.length : streamHighlightedText.lastIndexOf('\n') + 1
+  const streamHighlightCandidate = streamHighlightedText.slice(0, streamHighlightBoundary)
+  const highlightedPrefix =
+    streaming && streamHighlightCandidate && text.startsWith(streamHighlightCandidate) ? streamHighlightCandidate : ''
+  const plainTail = streaming ? text.slice(highlightedPrefix.length) : ''
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text)
@@ -107,14 +158,44 @@ export function CodeBlock({ inline, className, children = '' }) {
           {copied ? '已复制' : '复制'}
         </Button>
       </div>
-      <SyntaxHighlighter
-        language={language}
-        style={darkMode ? oneDark : oneLight}
-        customStyle={{ margin: 0, borderRadius: 0, fontSize: '13px', lineHeight: '1.55' }}
-        wrapLongLines
-      >
-        {text}
-      </SyntaxHighlighter>
+      {streaming ? (
+        highlightedPrefix ? (
+          <div className='overflow-x-auto'>
+            <SyntaxHighlighter
+              language={language}
+              style={darkMode ? oneDark : oneLight}
+              customStyle={{ margin: 0, borderRadius: 0, fontSize: '13px', lineHeight: '1.55', paddingBottom: 0 }}
+              wrapLongLines
+            >
+              {highlightedPrefix}
+            </SyntaxHighlighter>
+            {plainTail && (
+              <pre
+                className='whitespace-pre-wrap break-words text-[13px] leading-[1.55]'
+                style={{ margin: 0, padding: '0 1em 1em', backgroundColor: 'transparent' }}
+              >
+                {plainTail}
+              </pre>
+            )}
+          </div>
+        ) : (
+          <pre
+            className='whitespace-pre-wrap break-words overflow-x-auto text-[13px] leading-[1.55]'
+            style={{ margin: 0, padding: '1em', backgroundColor: 'transparent' }}
+          >
+            {text}
+          </pre>
+        )
+      ) : (
+        <SyntaxHighlighter
+          language={language}
+          style={darkMode ? oneDark : oneLight}
+          customStyle={{ margin: 0, borderRadius: 0, fontSize: '13px', lineHeight: '1.55' }}
+          wrapLongLines
+        >
+          {text}
+        </SyntaxHighlighter>
+      )}
     </div>
   )
 }

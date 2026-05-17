@@ -1,6 +1,6 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\components\markdown\MarkdownRenderer.jsx
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
@@ -72,11 +72,12 @@ function autoCloseMarkdownTags(text) {
   let inMathBlock = false
   
   let i = 0
-  while (i < text.length) {
+  const len = text.length
+  while (i < len) {
     const char = text[i]
     
     // 1. 处理代码块 ```
-    if (text.slice(i, i + 3) === '```') {
+    if (char === '`' && text.startsWith('```', i)) {
       inCodeBlock = !inCodeBlock
       if (!inCodeBlock) {
         // 退出代码块时，忽略内部收集的其它错乱标签
@@ -93,7 +94,7 @@ function autoCloseMarkdownTags(text) {
     }
 
     // 处理块级公式 $$
-    if (text.slice(i, i + 2) === '$$') {
+    if (char === '$' && text.startsWith('$$', i)) {
       inMathBlock = !inMathBlock
       i += 2
       continue
@@ -105,7 +106,7 @@ function autoCloseMarkdownTags(text) {
     }
     
     // 2. 处理粗体 **
-    if (text.slice(i, i + 2) === '**') {
+    if (char === '*' && text.startsWith('**', i)) {
       if (stack[stack.length - 1]?.tag === '**') {
         stack.pop()
       } else {
@@ -127,7 +128,7 @@ function autoCloseMarkdownTags(text) {
     }
     
     // 4. 处理删除线 ~~
-    if (text.slice(i, i + 2) === '~~') {
+    if (char === '~' && text.startsWith('~~', i)) {
       if (stack[stack.length - 1]?.tag === '~~') {
         stack.pop()
       } else {
@@ -175,7 +176,22 @@ function autoCloseMarkdownTags(text) {
   return result
 }
 
-export function MarkdownRenderer({ content }) {
+const markdownComponents = {
+  code: ({ inline, className, children }) => (
+    <CodeBlock inline={inline} className={className}>
+      {children}
+    </CodeBlock>
+  ),
+  a: ({ ...props }) => <a className='text-primary underline underline-offset-4' target='_blank' rel='noreferrer' {...props} />,
+  blockquote: ({ ...props }) => (
+    <blockquote className='my-3 border-l-4 border-border bg-muted/40 px-3 py-2 text-muted-foreground' {...props} />
+  ),
+  table: ({ ...props }) => <table className='my-3 w-full border-collapse text-left text-xs' {...props} />,
+  th: ({ ...props }) => <th className='border border-border bg-muted px-2 py-1.5 font-medium' {...props} />,
+  td: ({ ...props }) => <td className='border border-border px-2 py-1.5 align-top' {...props} />,
+}
+
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, streaming = false }) {
   const rawText = normalizeMarkdownContent(content)
   const mathNormalized = normalizeMathDelimiters(rawText)
   const safeContent = autoCloseMarkdownTags(mathNormalized)
@@ -217,28 +233,24 @@ export function MarkdownRenderer({ content }) {
     return plugins
   }, [hasMath, mathPlugins.rehypeKatex])
 
+  const components = useMemo(() => ({
+    ...markdownComponents,
+    code: ({ inline, className, children }) => (
+      <CodeBlock inline={inline} className={className} streaming={streaming}>
+        {children}
+      </CodeBlock>
+    ),
+  }), [streaming])
+
   return (
     <div className='markdown-body text-base leading-7 text-foreground'>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
-        components={{
-          code: ({ inline, className, children }) => (
-            <CodeBlock inline={inline} className={className}>
-              {children}
-            </CodeBlock>
-          ),
-          a: ({ ...props }) => <a className='text-primary underline underline-offset-4' target='_blank' rel='noreferrer' {...props} />,
-          blockquote: ({ ...props }) => (
-            <blockquote className='my-3 border-l-4 border-border bg-muted/40 px-3 py-2 text-muted-foreground' {...props} />
-          ),
-          table: ({ ...props }) => <table className='my-3 w-full border-collapse text-left text-xs' {...props} />,
-          th: ({ ...props }) => <th className='border border-border bg-muted px-2 py-1.5 font-medium' {...props} />,
-          td: ({ ...props }) => <td className='border border-border px-2 py-1.5 align-top' {...props} />,
-        }}
+        components={components}
       >
         {safeContent}
       </ReactMarkdown>
     </div>
   )
-}
+})

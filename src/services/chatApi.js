@@ -112,8 +112,8 @@ export async function streamChat({
   } catch (error) {
     if (error.name !== 'AbortError') {
       onError?.(error)
-      throw error
     }
+    throw error
   } finally {
     reader.releaseLock()// 释放资源，确保连接关闭后不再占用内存。
   }

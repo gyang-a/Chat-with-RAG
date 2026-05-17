@@ -1,6 +1,6 @@
 // application module
 // File: C:\Users\yango\Desktop\Chat\src\components\chat\MessageBubble.jsx
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, memo } from 'react'
 import { Bot } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { MessageActions } from '@/components/chat/MessageActions'
@@ -34,7 +34,7 @@ function retrievalModeLabel(mode = '') {
   return ''
 }
 
-export function MessageBubble({ message, onRegenerate, streaming = false }) {
+export const MessageBubble = memo(function MessageBubble({ message, onRegenerate, streaming = false }) {
   const isUser = message.role === 'user'
   const retrievalLabel = retrievalModeLabel(String(message?.retrievalModeUsed || ''))
   const avatarUrl = useAuthStore((s) => s.avatarUrl)
@@ -110,7 +110,7 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
           <Suspense
             fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
           >
-            <MarkdownRenderer content={normalizedContent} />
+            <MarkdownRenderer content={normalizedContent} streaming={streaming} />
           </Suspense>
           
           {!streaming && message.refs && message.refs.length > 0 && (
@@ -138,4 +138,4 @@ export function MessageBubble({ message, onRegenerate, streaming = false }) {
       </div>
     </div>
   )
-}
+})

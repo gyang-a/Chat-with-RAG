@@ -136,8 +136,9 @@ export function useSSEChat() {
       const flushDelta = () => {
         if (!assistant?.id || !deltaBuffer) return
 
-        // 每次最多截取定量字符(如3个字符)，限制吐字速度，制造平滑的打字机假象
-        const chunkSize = Math.max(1, Math.min(3, deltaBuffer.length))
+        // 动态计算字符截取量，防止缓冲区积压导致极度密集且毫无意义的碎帧循环（核心性能优化）
+        // 保证在 4 帧以内消耗完当前缓冲区，而不是每次死板地只取 3 个字
+        const chunkSize = Math.max(4, Math.min(4, deltaBuffer.length))
         const nextChunk = deltaBuffer.slice(0, chunkSize)
         deltaBuffer = deltaBuffer.slice(chunkSize)
 
