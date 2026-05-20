@@ -20,32 +20,37 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
+          const normalizedId = id.replaceAll('\\', '/')
 
-          if (id.includes('/react/') || id.includes('/react-dom/')) {
+          if (normalizedId.includes('/react/') || normalizedId.includes('/react-dom/')) {
             return 'react-vendor'
           }
 
-          if (id.includes('lucide-react') || id.includes('@radix-ui') || id.includes('sonner')) {
+          if (normalizedId.includes('lucide-react') || normalizedId.includes('@radix-ui') || normalizedId.includes('sonner')) {
             return 'ui-vendor'
           }
 
-          if (id.includes('@chenglou/pretext') || id.includes('react-virtuoso')) {
+          if (normalizedId.includes('@chenglou/pretext') || normalizedId.includes('react-virtuoso')) {
             return 'chat-vendor'
           }
 
-          if (id.includes('react-syntax-highlighter')) {
+          if (normalizedId.includes('react-syntax-highlighter')) {
             return 'syntax-vendor'
           }
 
-          if (id.includes('katex')) {
-            return 'katex-vendor'
+          if (
+            normalizedId.includes('katex') ||
+            normalizedId.includes('remark-math') ||
+            normalizedId.includes('rehype-katex')
+          ) {
+            return 'markdown-math-vendor'
           }
 
           if (
-            id.includes('react-markdown') ||
-            id.includes('remark-') ||
-            id.includes('rehype-') ||
-            id.includes('micromark')
+            normalizedId.includes('react-markdown') ||
+            normalizedId.includes('remark-') ||
+            normalizedId.includes('rehype-') ||
+            normalizedId.includes('micromark')
           ) {
             return 'markdown-parser-vendor'
           }

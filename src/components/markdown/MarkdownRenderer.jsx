@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import 'katex/dist/katex.min.css'
 import { CodeBlock } from '@/components/markdown/CodeBlock'
 
 const MATH_MARKER_REGEX = /(\\\(|\\\[|\$\$?|\\begin\{(?:align\*?|aligned|gather\*?|cases|pmatrix|bmatrix|vmatrix)\})/
@@ -203,7 +204,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
     if (!hasMath) return
 
     let cancelled = false
-    Promise.all([import('remark-math'), import('rehype-katex'), import('katex/dist/katex.min.css')])
+    Promise.all([import('remark-math'), import('rehype-katex')])
       .then(([remarkMathModule, rehypeKatexModule]) => {
         if (cancelled) return
         setMathPlugins({
