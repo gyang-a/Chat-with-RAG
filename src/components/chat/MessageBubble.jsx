@@ -12,6 +12,8 @@ const MarkdownRenderer = lazy(() =>
   import('@/components/markdown/MarkdownRenderer').then((module) => ({ default: module.MarkdownRenderer })),
 )
 
+const CODE_BLOCK_REGEX = /(^|\n)\s*(```|~~~)/
+
 function normalizeDisplayText(value) {
   if (value == null) return ''
   if (typeof value === 'string') return value
@@ -41,6 +43,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onRegenerate
   const username = useAuthStore((s) => s.username)
   const displayLabel = String(username || 'U').slice(0, 1).toUpperCase()
   const normalizedContent = normalizeDisplayText(message.content || '')
+  const hasCodeBlock = CODE_BLOCK_REGEX.test(normalizedContent)
   const streamingMinHeight =
     streaming && Number.isFinite(Number(message?.streamLayoutHeight))
       ? Math.max(46, Number(message.streamLayoutHeight))
@@ -107,11 +110,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onRegenerate
               当前回答: {retrievalLabel}
             </div>
           )}
-          <Suspense
-            fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
-          >
-            <MarkdownRenderer content={normalizedContent} streaming={streaming} />
-          </Suspense>
+          {hasCodeBlock ? (
+            <Suspense
+              fallback={<pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>}
+            >
+              <MarkdownRenderer content={normalizedContent} streaming={streaming} />
+            </Suspense>
+          ) : (
+            <pre className='whitespace-pre-wrap break-words font-sans text-sm leading-7'>{normalizedContent}</pre>
+          )}
           
           {!streaming && message.refs && message.refs.length > 0 && (
             <div className='mt-3 space-y-1.5 border-t border-border pt-3'>
