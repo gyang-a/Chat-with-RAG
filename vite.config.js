@@ -27,48 +27,48 @@ export default defineConfig({
       brotliSize: true,              // 显示 brotli 后大小
     })],
   build: {
-    // rollupOptions: {
-    //   output: {
-    //     manualChunks(id) {
-    //       if (!id.includes('node_modules')) return
-    //       const normalizedId = id.replaceAll('\\', '/')
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          const normalizedId = id.replaceAll('\\', '/')
 
-    //       if (normalizedId.includes('/react/') || normalizedId.includes('/react-dom/')) {
-    //         return 'react-vendor'
-    //       }
+          if (normalizedId.includes('/react/') || normalizedId.includes('/react-dom/')) {
+            return 'react-vendor'
+          }
 
-    //       if (normalizedId.includes('lucide-react') || normalizedId.includes('@radix-ui') || normalizedId.includes('sonner')) {
-    //         return 'ui-vendor'
-    //       }
+          if (normalizedId.includes('lucide-react') || normalizedId.includes('@radix-ui') || normalizedId.includes('sonner')) {
+            return 'ui-vendor'
+          }
 
-    //       if (normalizedId.includes('react-virtuoso')) {
-    //         return 'chat-vendor'
-    //       }
+          if (normalizedId.includes('react-virtuoso')) {
+            return 'chat-vendor'
+          }
 
-    //       if (normalizedId.includes('react-syntax-highlighter')) {
-    //         return 'syntax-vendor'
-    //       }
+          if (normalizedId.includes('react-syntax-highlighter')) {
+            return 'syntax-vendor'
+          }
 
-    //       if (
-    //         normalizedId.includes('katex') ||
-    //         normalizedId.includes('remark-math') ||
-    //         normalizedId.includes('rehype-katex')
-    //       ) {
-    //         return 'markdown-math-vendor'
-    //       }
+          if (
+            normalizedId.includes('katex') ||
+            normalizedId.includes('remark-math') ||
+            normalizedId.includes('rehype-katex')
+          ) {
+            return 'markdown-math-vendor'
+          }
 
-    //       if (
-    //         normalizedId.includes('react-markdown') ||
-    //         normalizedId.includes('remark-') ||
-    //         normalizedId.includes('rehype-') ||
-    //         normalizedId.includes('micromark')
-    //       ) {
-    //         return 'markdown-parser-vendor'
-    //       }
-    //       return 'vendor'
-    //     },
-    //   },
-    // },
+          if (
+            normalizedId.includes('react-markdown') ||
+            normalizedId.includes('remark-') ||
+            normalizedId.includes('rehype-') ||
+            normalizedId.includes('micromark')
+          ) {
+            return 'markdown-parser-vendor'
+          }
+          return 'vendor'
+        },
+      },
+    },
   },
   server: {
     proxy: backendProxy,

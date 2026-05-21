@@ -61,6 +61,7 @@ export function ChatWindow({
         ) : (
           <>
             <MessageList
+              key={currentConversationId}
               messages={messages}
               generating={generating}
               autoScrollEnabled={autoScrollEnabled}

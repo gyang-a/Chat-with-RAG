@@ -23,7 +23,8 @@ export function MessageList({
       className='h-full py-2'
       data={messages}
       atBottomStateChange={onAtBottomStateChange}
-      followOutput={autoScrollEnabled ? (generating ? 'auto' : 'smooth') : false}
+      initialTopMostItemIndex={{ index: messages.length - 1, align: 'end', behavior: 'auto' }}
+      followOutput={generating && autoScrollEnabled ? 'auto' : false}
       overscan={220}
       itemContent={(_, item) => {
         const streaming = Boolean(generating && item.role === 'assistant' && item.id === latestAssistantId)
