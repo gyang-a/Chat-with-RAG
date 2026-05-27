@@ -15,6 +15,12 @@ function getAuthHeaders() {
     : undefined
 }
 
+function handleUnauthorized(response) {
+  if (response.status !== 401) return false
+  useAuthStore.getState().clearAuth?.()
+  return true
+}
+
 export async function fetchAvailableModels() {
   // 获取当前账号可用模型，供输入区模型下拉框使用。
   const response = await fetch(API_MODELS_URL, {
@@ -22,6 +28,9 @@ export async function fetchAvailableModels() {
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录已失效，请重新登录')
+    }
     throw new Error('读取模型列表失败')
   }
 

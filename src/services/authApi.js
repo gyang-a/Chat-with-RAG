@@ -77,7 +77,9 @@ export async function fetchAuthProfile(token) {
 
   if (!response.ok) {
     const message = await parseErrorMessage(response, '获取用户信息失败')
-    throw new Error(message)
+    const error = new Error(message)
+    error.status = response.status
+    throw error
   }
 
   return response.json()

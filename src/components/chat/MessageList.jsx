@@ -4,7 +4,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { MessageBubble } from '@/components/chat/MessageBubble'
 import { useVariableVirtualList } from '@/hooks/useVariableVirtualList'
 
-const ESTIMATE_MESSAGE_HEIGHT = 132
+const ESTIMATE_MESSAGE_HEIGHT = 90
 const OVERSCAN_COUNT = 5
 
 const VirtualMessageRow = memo(function VirtualMessageRow({

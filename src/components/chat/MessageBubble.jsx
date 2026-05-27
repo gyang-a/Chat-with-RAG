@@ -45,7 +45,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onRegenerate
     streaming && Number.isFinite(Number(message?.streamLayoutHeight))
       ? Math.max(46, Number(message.streamLayoutHeight))
       : undefined
-
+//用户消息气泡：右侧对齐，灰色背景，显示用户头像和内容，支持附件列表显示
   if (isUser) {
     const attachments = message.attachments || []
     return (
@@ -132,7 +132,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onRegenerate
               </div>
             </div>
           )}
-          
           <MessageActions message={message} onRegenerate={onRegenerate} />
         </div>
       </div>

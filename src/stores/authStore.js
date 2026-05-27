@@ -57,6 +57,7 @@ export const useAuthStore = create(
       submitting: false,
       setAuthError: (authError) => set({ authError }),
       setRememberMe: (rememberMe) => set({ rememberMe: Boolean(rememberMe) }),
+      clearAuth: () => set({ token: '', username: '', avatarUrl: '', submitting: false, authError: '' }),
 
       // 登录动作：请求后端并更新本地认证状态。
       login: async ({ username, password, rememberMe = true }) => {
@@ -122,7 +123,7 @@ export const useAuthStore = create(
       logout: async () => {
         // 先清本地状态，再通知后端登出
         const token = get().token
-        set({ token: '', username: '', avatarUrl: '', submitting: false, authError: '' })
+        get().clearAuth()
         await logoutByToken(token)
       },
       // 刷新用户资料：用于恢复会话后同步头像等服务端字段。
@@ -130,11 +131,18 @@ export const useAuthStore = create(
         // 登录后主动拉一次资料，确保持久化会话也能拿到最新头像
         const token = get().token
         if (!token) return
-        const result = await fetchAuthProfile(token)
-        set({
-          username: String(result?.user?.username || get().username || '').trim(),
-          avatarUrl: String(result?.user?.avatarUrl || '').trim(),
-        })
+        try {
+          const result = await fetchAuthProfile(token)
+          set({
+            username: String(result?.user?.username || get().username || '').trim(),
+            avatarUrl: String(result?.user?.avatarUrl || '').trim(),
+          })
+        } catch (error) {
+          if (error?.status === 401) {
+            get().clearAuth()
+          }
+          throw error
+        }
       },
       // 上传头像并更新本地 avatarUrl，供 UI 立即展示。
       uploadAvatar: async (file) => {

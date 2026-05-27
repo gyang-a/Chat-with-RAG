@@ -95,6 +95,8 @@ export const useChatStore = create(
       generating: false,
       streamError: '',
       quickCards,
+
+
 // 账号切换时保存旧账号历史并加载新账号历史桶
       syncAuthOwner: (username) => {
         const safeUsername = String(username || '').trim()
@@ -199,7 +201,7 @@ export const useChatStore = create(
           const ownerUsername = String(state.ownerUsername || '').trim()
           const emptySnapshot = buildEmptyChatSnapshot()
 
-          if (!ownerUsername) {
+          if (!ownerUsername) { 
             return {
               ...emptySnapshot,
             }

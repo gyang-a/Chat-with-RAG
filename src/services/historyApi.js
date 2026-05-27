@@ -13,6 +13,12 @@ function buildAuthHeaders() {
     : {}
 }
 
+function handleUnauthorized(response) {
+  if (response.status !== 401) return false
+  useAuthStore.getState().clearAuth?.()
+  return true
+}
+
 export async function fetchHistorySnapshot() {
   // 从后端加载历史快照并做基础结构兜底。
   const response = await fetch(API_HISTORY_URL, {
@@ -23,6 +29,9 @@ export async function fetchHistorySnapshot() {
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录已失效，请重新登录')
+    }
     throw new Error('读取历史记录失败')
   }
 
@@ -48,6 +57,9 @@ export async function saveHistorySnapshot(snapshot) {
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录已失效，请重新登录')
+    }
     throw new Error('保存历史记录失败')
   }
 }
