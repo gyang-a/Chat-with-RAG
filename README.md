@@ -13,12 +13,18 @@
 桌面端应用截图：
 <img src="image-1.png" alt="alt text" width="360">
 
- 移动端截图：
+移动端截图：
  
-<img src="image-2.png" alt="alt text" height="420">
-<img src="image-3.png" alt="alt text" height="420">
-<img src="image-4.png" alt="alt text" height="420">
-<img src="image-5.png" alt="alt text" height="420">
+<table>
+  <tr>
+    <td><img src="image-2.png" alt="alt text" height="420"></td>
+    <td><img src="image-3.png" alt="alt text" height="420"></td>
+  </tr>
+  <tr>
+    <td><img src="image-4.png" alt="alt text" height="420"></td>
+    <td><img src="image-5.png" alt="alt text" height="420"></td>
+  </tr>
+</table>
 前端相关技术栈：
 
 核心框架：React 19
