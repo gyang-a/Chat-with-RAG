@@ -9,10 +9,10 @@
 
 前端生产构建桌面端性能：![alt text](image.png)
  桌面端应用截图：![alt text](image-1.png)
- 移动端截图：![alt text](37a7384d871eee660038c955a71578ad.jpg)
- ![alt text](bccfd5a090355d4666124a2543e8b439.jpg)
- ![alt text](122a50e7041eab41ede128d09cdfcc67.jpg)
- ![alt text](f9443f9bdc9a453400af14f65a918bef.jpg)
+ 移动端截图：![alt text](image-2.png)
+ ![alt text](image-3.png)
+ ![alt text](image-4.png)
+ ![alt text](image-5.png)
 前端相关技术栈：
 
 核心框架：React 19
