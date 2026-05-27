@@ -9,7 +9,9 @@
 
 前端生产构建桌面端性能：![alt text](image.png)
  桌面端应用截图：![alt text](image-1.png)
- 移动端截图：![alt text](image-2.png)
+ 移动端截图：
+ 
+ ![alt text](image-2.png)
  ![alt text](image-3.png)
  ![alt text](image-4.png)
  ![alt text](image-5.png)
