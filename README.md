@@ -8,7 +8,11 @@
 整体架构轻量化、可扩展，实现了私有数据安全可控、检索精准高效、生成内容可靠可信，适用于个人文档管理、内部知识库问答等实际落地场景。
 
 前端生产构建桌面端性能：![alt text](image.png)
-
+ 桌面端应用截图：![alt text](image-1.png)
+ 移动端截图：![alt text](37a7384d871eee660038c955a71578ad.jpg)
+ ![alt text](bccfd5a090355d4666124a2543e8b439.jpg)
+ ![alt text](122a50e7041eab41ede128d09cdfcc67.jpg)
+ ![alt text](f9443f9bdc9a453400af14f65a918bef.jpg)
 前端相关技术栈：
 
 核心框架：React 19
