@@ -17,12 +17,12 @@
  
 <table>
   <tr>
-    <td><img src="image-2.png" alt="alt text" height="420"></td>
-    <td><img src="image-3.png" alt="alt text" height="420"></td>
+    <td style="padding: 20px;"><img src="image-2.png" alt="alt text" height="420"></td>
+    <td style="padding: 20px;"><img src="image-3.png" alt="alt text" height="420"></td>
   </tr>
   <tr>
-    <td><img src="image-4.png" alt="alt text" height="420"></td>
-    <td><img src="image-5.png" alt="alt text" height="420"></td>
+    <td style="padding: 20px;"><img src="image-4.png" alt="alt text" height="420"></td>
+    <td style="padding: 20px;"><img src="image-5.png" alt="alt text" height="420"></td>
   </tr>
 </table>
 前端相关技术栈：
