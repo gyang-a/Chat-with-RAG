@@ -7,7 +7,24 @@
 
 整体架构轻量化、可扩展，实现了私有数据安全可控、检索精准高效、生成内容可靠可信，适用于个人文档管理、内部知识库问答等实际落地场景。
 
-前端生产构建桌面端性能：![alt text](image.png)
+前端生产构建桌面端性能：
+<img src="image.png" alt="alt text" width="360">
+
+桌面端应用截图：
+<img src="image-1.png" alt="alt text" width="360">
+
+移动端截图：
+
+<table cellpadding="12" cellspacing="12">
+  <tr>
+    <td><img src="2f75fc5153b0f0b760485927b31daf69.jpg" alt="alt text" height="420" style="margin: 12px;"></td>
+    <td><img src="439ecf86c6634cb7fceb52dfb18c31d8.jpg" alt="alt text" height="420" style="margin: 12px;"></td>
+  </tr>
+  <tr>
+    <td><img src="713c70cee20aa4c2f3d2836be79737dd.jpg" alt="alt text" height="420" style="margin: 12px;"></td>
+    <td><img src="f9443f9bdc9a453400af14f65a918bef.jpg" alt="alt text" height="420" style="margin: 12px;"></td>
+  </tr>
+</table>
 
 前端相关技术栈：
 
